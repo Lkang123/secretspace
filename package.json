@@ -1,0 +1,32 @@
+{
+  "name": "secretspace",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "build": "cd client && npm install && npm run build",
+    "dev": "concurrently \"node --watch server.js\" \"npm --prefix client run dev\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lkang123/secretspace.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Lkang123/secretspace/issues"
+  },
+  "homepage": "https://github.com/Lkang123/secretspace#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
