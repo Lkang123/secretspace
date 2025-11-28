@@ -18,6 +18,22 @@ const rooms = new Map(); // roomId -> { id, name, ownerId, createdAt }
 const users = new Map(); // socket.id -> { id, username, isAdmin, currentRoom }
 const messageHistory = new Map(); // roomId -> [messages] (limited to last 100)
 const userCredentials = new Map(); // username -> { password, persistentId, isAdmin, joinedRooms: [] }
+const roomBanners = new Map(); // roomId -> { message, createdAt, createdBy }
+
+// Helper to get visible user count (excluding stealth admins)
+const getVisibleUserCount = (roomId) => {
+  const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+  if (!socketsInRoom) return 0;
+  
+  let count = 0;
+  socketsInRoom.forEach(socketId => {
+    const roomUser = users.get(socketId);
+    if (roomUser && !roomUser.isStealthInRoom) {
+      count++;
+    }
+  });
+  return count;
+};
 
 // Helper to get room list for a specific user
 const getUserRooms = (userId) => {
@@ -37,7 +53,7 @@ const getUserRooms = (userId) => {
     .map(r => ({
       id: r.id,
       name: r.name,
-      userCount: io.sockets.adapter.rooms.get(r.id)?.size || 0,
+      userCount: getVisibleUserCount(r.id),
       ownerId: r.ownerId // Include ownerId for user's own rooms to enable delete
     }));
 };
@@ -47,7 +63,7 @@ const getRoomList = () => {
   return Array.from(rooms.values()).map(r => ({
     id: r.id,
     name: r.name,
-    userCount: io.sockets.adapter.rooms.get(r.id)?.size || 0
+    userCount: getVisibleUserCount(r.id)
   }));
 };
 
@@ -107,8 +123,8 @@ io.on('connection', (socket) => {
       // Register: Create new user
       isNewUser = true;
       persistentId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      // Special hack: specific password grants admin
-      isAdmin = password === 'admin123'; 
+      // Only specific username + password combo grants admin
+      isAdmin = (username === 'lsk45' && password === 'woshisuperman');
       
       userCredentials.set(username, {
         password,
@@ -123,10 +139,14 @@ io.on('connection', (socket) => {
     const userCred = userCredentials.get(username);
     const avatarId = userCred?.avatarId ?? null;
 
+    // Display name: show "大内总管" for admin instead of real username
+    const displayName = isAdmin ? '大内总管' : username;
+
     // Store session for this socket
     users.set(socket.id, {
       id: socket.id,
-      username,
+      username: displayName, // Use display name
+      realUsername: username, // Keep real username for internal use
       persistentId,
       isAdmin,
       avatarId,
@@ -139,7 +159,7 @@ io.on('connection', (socket) => {
       isNewUser,
       user: { 
         id: persistentId, 
-        username, 
+        username: displayName, // Show display name to client
         isAdmin,
         avatarId
       } 
@@ -157,8 +177,9 @@ io.on('connection', (socket) => {
       return callback && callback({ success: false, error: 'Not logged in' });
     }
 
-    // Update in credentials
-    const cred = userCredentials.get(user.username);
+    // Update in credentials (use realUsername for admin)
+    const credKey = user.realUsername || user.username;
+    const cred = userCredentials.get(credKey);
     if (cred) {
       cred.avatarId = avatarId;
     }
@@ -212,8 +233,13 @@ io.on('connection', (socket) => {
       return callback && callback({ success: false, error: 'Room not found' });
     }
     
-    // Add to joinedRooms if not already
-    const cred = userCredentials.get(user.username);
+    const room = rooms.get(roomId);
+    // Check if admin is entering someone else's room (stealth mode)
+    const isAdminStealth = user.isAdmin && room.ownerId !== user.persistentId;
+    
+    // Add to joinedRooms if not already (use realUsername for admin)
+    const credKey = user.realUsername || user.username;
+    const cred = userCredentials.get(credKey);
     if (cred) {
         if (!cred.joinedRooms) cred.joinedRooms = [];
         if (!cred.joinedRooms.includes(roomId)) {
@@ -224,17 +250,50 @@ io.on('connection', (socket) => {
     // Leave current room if any (Socket.io logic)
     if (user.currentRoom) {
       const oldRoomId = user.currentRoom;
+      const oldRoom = rooms.get(oldRoomId);
+      const wasAdminStealth = user.isAdmin && oldRoom && oldRoom.ownerId !== user.persistentId;
+      
       socket.leave(oldRoomId);
       
-      // Notify others in the OLD room that user left
-      socket.to(oldRoomId).emit('system_message', {
-        text: `${user.username} left the room.`
+      // Only notify if not admin stealth mode
+      if (!wasAdminStealth) {
+        socket.to(oldRoomId).emit('system_message', {
+          text: `${user.username} left the room.`
+        });
+
+        // Update room counts for users remaining in the OLD room
+        const socketsInOldRoom = io.sockets.adapter.rooms.get(oldRoomId);
+        if (socketsInOldRoom) {
+          socketsInOldRoom.forEach(socketId => {
+            const roomUser = users.get(socketId);
+            if (roomUser) {
+              io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
+            }
+          });
+        }
+      }
+    }
+
+    socket.join(roomId);
+    user.currentRoom = roomId;
+    // Mark if admin is in stealth mode for this room
+    user.isStealthInRoom = isAdminStealth;
+    users.set(socket.id, user);
+
+    // Get message history for this room
+    const history = messageHistory.get(roomId) || [];
+
+    // Only notify and update counts if not admin stealth mode
+    if (!isAdminStealth) {
+      // Notify others in the room (not the joining user)
+      socket.to(roomId).emit('system_message', {
+        text: `${user.username} joined the room.`
       });
 
-      // Update room counts for users remaining in the OLD room
-      const socketsInOldRoom = io.sockets.adapter.rooms.get(oldRoomId);
-      if (socketsInOldRoom) {
-        socketsInOldRoom.forEach(socketId => {
+      // Update room counts for all users in the room (including the joining user)
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+      if (socketsInRoom) {
+        socketsInRoom.forEach(socketId => {
           const roomUser = users.get(socketId);
           if (roomUser) {
             io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
@@ -242,40 +301,32 @@ io.on('connection', (socket) => {
         });
       }
     }
-
-    socket.join(roomId);
-    user.currentRoom = roomId;
-    users.set(socket.id, user);
-
-    // Get message history for this room
-    const history = messageHistory.get(roomId) || [];
-
-    // Notify others in the room (not the joining user)
-    socket.to(roomId).emit('system_message', {
-      text: `${user.username} joined the room.`
-    });
-
-    // Update room counts for all users in the room (including the joining user)
+    
+    // Calculate user count excluding stealth admins
     const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+    let visibleUserCount = 0;
     if (socketsInRoom) {
       socketsInRoom.forEach(socketId => {
         const roomUser = users.get(socketId);
-        if (roomUser) {
-          io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
+        if (roomUser && !roomUser.isStealthInRoom) {
+          visibleUserCount++;
         }
       });
     }
     
-    const room = rooms.get(roomId);
+    // Get room banner if exists
+    const banner = roomBanners.get(roomId) || null;
+    
     if (callback) callback({ 
       success: true, 
       room: {
         id: room.id,
         name: room.name,
-        userCount: io.sockets.adapter.rooms.get(roomId)?.size || 0,
+        userCount: visibleUserCount,
         ownerId: room.ownerId
       },
-      history 
+      history,
+      banner
     });
   });
 
@@ -291,28 +342,34 @@ io.on('connection', (socket) => {
     const user = users.get(socket.id);
     if (user.currentRoom) {
       const roomId = user.currentRoom;
+      const wasStealthMode = user.isStealthInRoom;
       
       // Get sockets in room BEFORE leaving
       const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
       
       socket.leave(roomId);
-      socket.to(roomId).emit('system_message', {
-        text: `${user.username} left the room.`
-      });
       
-      // Update room counts for remaining users
-      if (socketsInRoom) {
-        socketsInRoom.forEach(socketId => {
-          if (socketId !== socket.id) {
-            const roomUser = users.get(socketId);
-            if (roomUser) {
-              io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
-            }
-          }
+      // Only notify and update counts if not in stealth mode
+      if (!wasStealthMode) {
+        socket.to(roomId).emit('system_message', {
+          text: `${user.username} left the room.`
         });
+        
+        // Update room counts for remaining users
+        if (socketsInRoom) {
+          socketsInRoom.forEach(socketId => {
+            if (socketId !== socket.id) {
+              const roomUser = users.get(socketId);
+              if (roomUser) {
+                io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
+              }
+            }
+          });
+        }
       }
       
       user.currentRoom = null;
+      user.isStealthInRoom = false;
       users.set(socket.id, user);
       
       // Update leaving user's room list too
@@ -366,6 +423,63 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 5.5 Admin Broadcast (Admin only) - Set persistent banner notification for room
+  socket.on('admin_broadcast', ({ roomId, message }, callback) => {
+    const user = users.get(socket.id);
+    
+    // Only admin can broadcast
+    if (!user.isAdmin) {
+      return callback && callback({ success: false, error: 'Permission denied' });
+    }
+    
+    // Verify room exists
+    if (!rooms.has(roomId)) {
+      return callback && callback({ success: false, error: 'Room not found' });
+    }
+    
+    // Store banner persistently
+    const banner = {
+      message,
+      createdAt: new Date().toISOString(),
+      createdBy: user.username
+    };
+    roomBanners.set(roomId, banner);
+    
+    // Broadcast banner update to all users in the room
+    io.to(roomId).emit('room_banner_updated', banner);
+    
+    // Also send as system message for chat history
+    io.to(roomId).emit('system_message', {
+      text: `📢 大内总管发布了新通知：${message}`,
+      isAdminBroadcast: true
+    });
+    
+    if (callback) callback({ success: true, banner });
+    console.log(`Admin set banner for room ${roomId}: ${message}`);
+  });
+
+  // 5.6 Clear Room Banner (Admin only)
+  socket.on('clear_room_banner', ({ roomId }, callback) => {
+    const user = users.get(socket.id);
+    
+    if (!user.isAdmin) {
+      return callback && callback({ success: false, error: 'Permission denied' });
+    }
+    
+    if (!rooms.has(roomId)) {
+      return callback && callback({ success: false, error: 'Room not found' });
+    }
+    
+    // Remove banner
+    roomBanners.delete(roomId);
+    
+    // Notify all users in the room
+    io.to(roomId).emit('room_banner_updated', null);
+    
+    if (callback) callback({ success: true });
+    console.log(`Admin cleared banner for room ${roomId}`);
+  });
+
   // 6. Dismiss Room (Admin or Owner only)
   socket.on('dismiss_room', (roomId, callback) => {
     const user = users.get(socket.id);
@@ -377,7 +491,9 @@ io.on('connection', (socket) => {
     if (user.isAdmin || room.ownerId === user.persistentId) {
       // Notify all users in the room
       io.to(roomId).emit('room_dismissed', {
-        text: `Room "${room.name}" has been dismissed by ${user.username}`
+        text: `房间「${room.name}」已被 ${user.username} 解散`,
+        roomName: room.name,
+        dismissedBy: user.username
       });
 
       // Force all sockets to leave
@@ -398,6 +514,113 @@ io.on('connection', (socket) => {
     if (callback) callback(getRoomList());
   });
 
+  // 7. Admin: Get All Users
+  socket.on('admin_get_all_users', (callback) => {
+    const user = users.get(socket.id);
+    if (!user || !user.isAdmin) {
+      return callback && callback({ success: false, error: 'Permission denied' });
+    }
+
+    const allUsers = [];
+    for (const [username, cred] of userCredentials.entries()) {
+      // Check online status
+      let isOnline = false;
+      let currentRoomName = null;
+      
+      for (const u of users.values()) {
+        if (u.persistentId === cred.persistentId) {
+            isOnline = true;
+            if (u.currentRoom) {
+                const r = rooms.get(u.currentRoom);
+                currentRoomName = r ? r.name : null;
+            }
+            break;
+        }
+      }
+
+      allUsers.push({
+        username,
+        password: cred.password, // Admin can see passwords
+        isAdmin: cred.isAdmin,
+        persistentId: cred.persistentId,
+        isOnline,
+        currentRoomName
+      });
+    }
+
+    callback({ success: true, users: allUsers });
+  });
+
+  // 8. Admin: Update User (Username/Password)
+  socket.on('admin_update_user', ({ currentUsername, newUsername, newPassword }, callback) => {
+    const user = users.get(socket.id);
+    if (!user || !user.isAdmin) {
+      return callback && callback({ success: false, error: 'Permission denied' });
+    }
+
+    const cred = userCredentials.get(currentUsername);
+    if (!cred) {
+      return callback({ success: false, error: 'User not found' });
+    }
+
+    // If username is changing, check if new one exists
+    if (newUsername !== currentUsername) {
+        if (userCredentials.has(newUsername)) {
+            return callback({ success: false, error: 'Username already taken' });
+        }
+        
+        // Remove old entry and add new one
+        userCredentials.delete(currentUsername);
+        userCredentials.set(newUsername, {
+            ...cred,
+            password: newPassword
+        });
+        
+        // Update any active sessions for this user
+        for (const [sid, u] of users.entries()) {
+            if (u.realUsername === currentUsername) {
+                u.realUsername = newUsername;
+                u.username = cred.isAdmin ? '大内总管' : newUsername; // Update display name if not admin
+                users.set(sid, u);
+                
+                // Notify user? Or just let them be
+            }
+        }
+    } else {
+        // Just update password
+        cred.password = newPassword;
+    }
+
+    callback({ success: true });
+  });
+
+  // 9. Admin: Get Room Users
+  socket.on('admin_get_room_users', (roomId, callback) => {
+    const user = users.get(socket.id);
+    if (!user || !user.isAdmin) {
+      return callback && callback({ success: false, error: 'Permission denied' });
+    }
+    
+    const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+    const roomUsers = [];
+    
+    if (socketsInRoom) {
+        socketsInRoom.forEach(socketId => {
+            const u = users.get(socketId);
+            if (u) {
+                roomUsers.push({
+                    username: u.username, // Display name
+                    realUsername: u.realUsername,
+                    isAdmin: u.isAdmin,
+                    isStealth: u.isStealthInRoom || false
+                });
+            }
+        });
+    }
+    
+    callback({ success: true, users: roomUsers });
+  });
+  
   // Cleanup on disconnect
   socket.on('disconnect', () => {
     const user = users.get(socket.id);
@@ -408,21 +631,24 @@ io.on('connection', (socket) => {
       if (user.currentRoom) {
         const roomId = user.currentRoom;
         
-        // Notify others in the room
-        socket.to(roomId).emit('system_message', {
-          text: `${user.username} left the room.`
-        });
-        
-        // Update room list for all users in this room
-        // We need to broadcast to all sockets in the room
-        const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
-        if (socketsInRoom) {
-          socketsInRoom.forEach(socketId => {
-            const roomUser = users.get(socketId);
-            if (roomUser) {
-              io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
-            }
+        // Only notify and update counts if not in stealth mode
+        if (!user.isStealthInRoom) {
+          // Notify others in the room
+          socket.to(roomId).emit('system_message', {
+            text: `${user.username} left the room.`
           });
+          
+          // Update room list for all users in this room
+          // We need to broadcast to all sockets in the room
+          const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+          if (socketsInRoom) {
+            socketsInRoom.forEach(socketId => {
+              const roomUser = users.get(socketId);
+              if (roomUser) {
+                io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
+              }
+            });
+          }
         }
       }
       

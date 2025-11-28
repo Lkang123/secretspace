@@ -2,16 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import EmojiPicker from 'emoji-picker-react';
 import { useChatStore } from '../store';
-import { Hash, ArrowLeft, Copy, Check, Reply, X, Smile } from 'lucide-react';
+import { Hash, ArrowLeft, Copy, Check, Reply, X, Smile, Megaphone, Volume2 } from 'lucide-react';
 import { getAvatarColor, getInitials, getAvatarUrl, getPresetAvatarUrl } from '../utils';
 
 export default function ChatArea() {
-  const { currentRoom, rooms, messages, sendMessage, user, leaveRoom, setReplyingTo, replyingTo, userAvatars } = useChatStore();
+  const { currentRoom, rooms, messages, sendMessage, user, leaveRoom, setReplyingTo, replyingTo, userAvatars, adminBroadcast, roomBanner, clearRoomBanner } = useChatStore();
   const [input, setInput] = useState('');
   const [copied, setCopied] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Reset banner dismissed state when banner changes
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [roomBanner?.message]);
 
   // Get real-time room data (for user count)
   const activeRoom = rooms.find(r => r.id === currentRoom?.id) || currentRoom;
@@ -149,10 +157,64 @@ export default function ChatArea() {
             </>
           )}
         </button>
+        
+        {/* Admin Broadcast Button */}
+        {user?.isAdmin && (
+          <button
+            onClick={() => setShowBroadcastModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors ml-2"
+          >
+            <Megaphone size={14} />
+            <span>发布通知</span>
+          </button>
+        )}
       </div>
 
+      {/* Banner Notification */}
+      <AnimatePresence>
+        {roomBanner && !bannerDismissed && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-16 left-0 right-0 z-10 mx-4 mt-2"
+          >
+            <div className="relative h-9 flex items-center overflow-hidden rounded-full border border-amber-400 dark:border-amber-500/50 bg-amber-50/80 dark:bg-amber-500/10 backdrop-blur-sm">
+              <div className="flex items-center gap-2 px-3 shrink-0 text-amber-600 dark:text-amber-400">
+                <Volume2 size={14} className="animate-pulse" />
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <div className="animate-marquee whitespace-nowrap">
+                  <span className="text-[13px] font-medium text-amber-700 dark:text-amber-300">
+                    {roomBanner.message}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 px-2 shrink-0">
+                {user?.isAdmin && (
+                  <button
+                    onClick={clearRoomBanner}
+                    className="px-2 py-0.5 rounded-full text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-200/50 dark:hover:bg-amber-500/20 transition-colors"
+                    title="清除通知"
+                  >
+                    清除
+                  </button>
+                )}
+                <button
+                  onClick={() => setBannerDismissed(true)}
+                  className="p-1 rounded-full text-amber-500 dark:text-amber-400 hover:bg-amber-200/50 dark:hover:bg-amber-500/20 transition-colors"
+                  title="暂时隐藏"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto pt-16 pb-20 px-4 space-y-1 scroll-smooth">
+      <div className={`flex-1 overflow-y-auto pb-20 px-4 space-y-1 scroll-smooth ${roomBanner && !bannerDismissed ? 'pt-[100px]' : 'pt-16'}`}>
         {messages.map((msg, i) => {
           const isMe = msg.senderId === user.id;
           const isSystem = msg.type === 'system';
@@ -341,6 +403,71 @@ export default function ChatArea() {
           </form>
         </div>
       </div>
+
+      {/* Admin Broadcast Modal */}
+      <AnimatePresence>
+        {showBroadcastModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowBroadcastModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[400px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">
+                  <Megaphone size={20} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-bold text-zinc-900 dark:text-white">发布房间通知</h3>
+                  <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
+                    通知将以系统消息形式发送给房间内所有用户
+                  </p>
+                </div>
+              </div>
+
+              <textarea
+                autoFocus
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+                placeholder="输入通知内容..."
+                className="w-full h-24 px-4 py-3 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[14px] text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-amber-400 dark:focus:border-amber-500 resize-none"
+              />
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    setShowBroadcastModal(false);
+                    setBroadcastMessage('');
+                  }}
+                  className="flex-1 h-11 rounded-full border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!broadcastMessage.trim()) return;
+                    await adminBroadcast(broadcastMessage.trim());
+                    setShowBroadcastModal(false);
+                    setBroadcastMessage('');
+                  }}
+                  disabled={!broadcastMessage.trim()}
+                  className="flex-1 h-11 rounded-full bg-amber-500 text-white font-bold hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  发布通知
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       </div>
   );
 }

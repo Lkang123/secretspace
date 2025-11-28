@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '../store';
 import { useThemeStore } from '../themeStore';
-import { Plus, Hash, Trash2, LogOut, Sun, Moon, X } from 'lucide-react';
+import { Plus, Hash, Trash2, LogOut, Sun, Moon, X, Shield } from 'lucide-react';
 import clsx from 'clsx';
 import Modal from './Modal';
 import { getAvatarColor, getInitials, getAvatarUrl, PRESET_AVATARS, getPresetAvatarUrl } from '../utils';
 
 export default function Sidebar() {
-  const { rooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar } = useChatStore();
+  const { rooms, adminRooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar, fetchAdminRooms, openAdminPanel } = useChatStore();
   const { theme, toggleTheme } = useThemeStore();
   const [isCreating, setIsCreating] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'join'
@@ -108,6 +108,18 @@ export default function Sidebar() {
               </form>
             )}
         </div>
+        {user?.isAdmin && (
+          <button
+            onClick={() => {
+              openAdminPanel();
+              fetchAdminRooms();
+            }}
+            className="w-full h-9 flex items-center justify-center gap-2 rounded-full border border-amber-400/70 bg-amber-50/90 dark:bg-amber-500/10 text-[13px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
+          >
+            <Shield size={14} />
+            <span>Admin Panel</span>
+          </button>
+        )}
       </div>
 
       {/* Room List */}

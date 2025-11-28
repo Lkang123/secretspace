@@ -11,14 +11,19 @@ export const useChatStore = create((set, get) => ({
   socket,
   user: null,
   rooms: [],
+  adminRooms: [],
   currentRoom: null,
   messages: [],
   messageCache: {}, // Cache messages per room: { roomId: [messages] }
   connected: false,
   showWelcomeModal: false,
+  showAdminWelcomeModal: false,
+  showAdminPanel: false,
   isRestoring: hasSavedSession, // True if we have a session to restore
   replyingTo: null, // New state for reply
   userAvatars: {}, // Cache: { username: avatarId }
+  roomDismissedInfo: null, // { roomName, message } when a room is dismissed
+  roomBanner: null, // { message, createdAt, createdBy } current room's banner
   
   closeWelcomeModal: () => {
     const { user } = get();
@@ -27,6 +32,24 @@ export const useChatStore = create((set, get) => ({
       localStorage.setItem(`welcome_seen_${user.id}`, 'true');
     }
     set({ showWelcomeModal: false });
+  },
+
+  closeAdminWelcomeModal: () => {
+    set({ showAdminWelcomeModal: false });
+  },
+
+  openAdminPanel: () => {
+    const { user } = get();
+    if (!user?.isAdmin) return;
+    set({ showAdminPanel: true });
+  },
+
+  closeAdminPanel: () => {
+    set({ showAdminPanel: false });
+  },
+
+  closeRoomDismissedModal: () => {
+    set({ roomDismissedInfo: null });
   },
 
   // Actions
@@ -95,6 +118,11 @@ export const useChatStore = create((set, get) => ({
             userAvatars: { ...state.userAvatars, [username]: avatarId }
         }));
     });
+
+    // Listen for room banner updates
+    socket.on('room_banner_updated', (banner) => {
+        set({ roomBanner: banner });
+    });
     
     socket.on('receive_message', (message) => {
       const { currentRoom, messageCache, user } = get();
@@ -138,7 +166,7 @@ export const useChatStore = create((set, get) => ({
       });
     });
 
-    socket.on('room_dismissed', ({ roomId, roomName }) => {
+    socket.on('room_dismissed', ({ text, roomName }) => {
         const { currentRoom, messageCache } = get();
         // Remove from cache and storage
         const newCache = { ...messageCache };
@@ -146,7 +174,13 @@ export const useChatStore = create((set, get) => ({
           delete newCache[currentRoom.id];
         }
         localStorage.removeItem('last_room_id');
-        set({ currentRoom: null, messages: [], messageCache: newCache });
+        // Show dismissed notification to user
+        set({ 
+          currentRoom: null, 
+          messages: [], 
+          messageCache: newCache,
+          roomDismissedInfo: { roomName: roomName || currentRoom?.name, message: text }
+        });
     });
 
     // Initial fetch
@@ -164,11 +198,14 @@ export const useChatStore = create((set, get) => ({
           // 3. It's not an auto-login (user manually logging in)
           const hasSeenWelcome = localStorage.getItem(`welcome_seen_${response.user.id}`);
           const shouldShowWelcome = response.isNewUser && !hasSeenWelcome && !isAutoLogin;
+          const isAdminUser = !!response.user.isAdmin;
+          const shouldShowAdminWelcome = isAdminUser && !isAutoLogin;
           
           set({ 
             user: response.user, 
             connected: true,
-            showWelcomeModal: shouldShowWelcome
+            showWelcomeModal: shouldShowWelcome,
+            showAdminWelcomeModal: shouldShowAdminWelcome
           });
           
           // Save session for auto-reconnect
@@ -209,6 +246,15 @@ export const useChatStore = create((set, get) => ({
     });
   },
 
+  fetchAdminRooms: () => {
+    const { user } = get();
+    if (!user?.isAdmin) return;
+
+    socket.emit('get_rooms', (rooms) => {
+      set({ adminRooms: rooms || [] });
+    });
+  },
+
   createRoom: (name) => {
     return new Promise((resolve) => {
       socket.emit('create_room', name, ({ success, roomId }) => {
@@ -228,7 +274,7 @@ export const useChatStore = create((set, get) => ({
         }));
       }
       
-      socket.emit('join_room', roomId, ({ success, room, history, error }) => {
+      socket.emit('join_room', roomId, ({ success, room, history, banner, error }) => {
         if (success) {
           // Save last room for auto-rejoin
           localStorage.setItem('last_room_id', roomId);
@@ -246,7 +292,7 @@ export const useChatStore = create((set, get) => ({
             id: `${msg.id}-${Math.random().toString(36).substr(2, 9)}`
           }));
           
-          set({ currentRoom: room, messages: serverMessages });
+          set({ currentRoom: room, messages: serverMessages, roomBanner: banner || null });
           resolve({ success: true });
         } else {
           // If join failed (e.g. room deleted), clear storage
@@ -269,7 +315,7 @@ export const useChatStore = create((set, get) => ({
     }
     socket.emit('leave_room');
     localStorage.removeItem('last_room_id');
-    set({ currentRoom: null, messages: [], replyingTo: null });
+    set({ currentRoom: null, messages: [], replyingTo: null, roomBanner: null });
   },
 
   setReplyingTo: (message) => set({ replyingTo: message }),
@@ -295,9 +341,80 @@ export const useChatStore = create((set, get) => ({
     set({ replyingTo: null });
   },
 
-  dismissRoom: (roomId) => {
+  dismissRoom: (roomId, onSuccess) => {
       socket.emit('dismiss_room', roomId, ({ success, error }) => {
-          // Silent fail - error handling done on UI level
+          if (success && typeof onSuccess === 'function') {
+            onSuccess();
+          }
+          // 其他错误先不弹 UI，后续有需要可以在这里补充提示
+      });
+  },
+
+  adminBroadcast: (message) => {
+    return new Promise((resolve) => {
+      const { currentRoom, user } = get();
+      if (!currentRoom || !user?.isAdmin) {
+        return resolve({ success: false, error: 'Not allowed' });
+      }
+      
+      socket.emit('admin_broadcast', { roomId: currentRoom.id, message }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  clearRoomBanner: () => {
+    return new Promise((resolve) => {
+      const { currentRoom, user } = get();
+      if (!currentRoom || !user?.isAdmin) {
+        return resolve({ success: false, error: 'Not allowed' });
+      }
+      
+      socket.emit('clear_room_banner', { roomId: currentRoom.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  // Admin User Management Actions
+  fetchAdminUsers: () => {
+    return new Promise((resolve) => {
+        const { user } = get();
+        if (!user?.isAdmin) return resolve([]);
+        
+        socket.emit('admin_get_all_users', (response) => {
+            if (response.success) {
+                resolve(response.users);
+            } else {
+                resolve([]);
+            }
+        });
+    });
+  },
+
+  adminUpdateUser: (currentUsername, newUsername, newPassword) => {
+    return new Promise((resolve) => {
+        const { user } = get();
+        if (!user?.isAdmin) return resolve({ success: false, error: 'Permission denied' });
+        
+        socket.emit('admin_update_user', { currentUsername, newUsername, newPassword }, (response) => {
+            resolve(response);
+        });
+    });
+  },
+  
+  fetchRoomUsers: (roomId) => {
+      return new Promise((resolve) => {
+        const { user } = get();
+        if (!user?.isAdmin) return resolve([]);
+        
+        socket.emit('admin_get_room_users', roomId, (response) => {
+            if (response.success) {
+                resolve(response.users);
+            } else {
+                resolve([]);
+            }
+        });
       });
   }
 }));

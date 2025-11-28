@@ -56,3 +56,22 @@ input[type="password"]::-ms-clear {
 input[type="password"]::-webkit-reveal-button {
   display: none;
 }
+
+/* Marquee animation for banner */
+@keyframes marquee {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  display: inline-block;
+  animation: marquee 12s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
