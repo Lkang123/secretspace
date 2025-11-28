@@ -15,8 +15,25 @@ export default function ChatArea() {
 
   const copyRoomId = async () => {
     if (!currentRoom) return;
+    const textToCopy = currentRoom.id;
+    
     try {
-      await navigator.clipboard.writeText(currentRoom.id);
+      // Try modern clipboard API first (requires HTTPS)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        // Fallback for HTTP: use textarea + execCommand
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
