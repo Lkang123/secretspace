@@ -17,6 +17,8 @@ export const useChatStore = create((set, get) => ({
   connected: false,
   showWelcomeModal: false,
   isRestoring: hasSavedSession, // True if we have a session to restore
+  replyingTo: null, // New state for reply
+  userAvatars: {}, // Cache: { username: avatarId }
   
   closeWelcomeModal: () => {
     const { user } = get();
@@ -60,7 +62,39 @@ export const useChatStore = create((set, get) => ({
 
     socket.on('disconnect', () => set({ connected: false }));
     
-    socket.on('rooms_updated', (rooms) => set({ rooms }));
+    socket.on('rooms_updated', (newRooms) => {
+      set((state) => {
+        const existingRoomsMap = new Map(state.rooms.map(r => [r.id, r]));
+        const mergedRooms = newRooms.map(newRoom => ({
+          ...newRoom,
+          unreadCount: existingRoomsMap.get(newRoom.id)?.unreadCount || 0
+        }));
+        return { rooms: mergedRooms };
+      });
+    });
+
+    // Listen for room notifications (new messages when outside)
+    socket.on('room_notification', ({ roomId }) => {
+        set((state) => {
+            const newRooms = state.rooms.map(room => {
+                if (room.id === roomId) {
+                    return {
+                        ...room,
+                        unreadCount: (room.unreadCount || 0) + 1
+                    };
+                }
+                return room;
+            });
+            return { rooms: newRooms };
+        });
+    });
+
+    // Listen for avatar updates from other users
+    socket.on('user_avatar_updated', ({ username, avatarId }) => {
+        set((state) => ({
+            userAvatars: { ...state.userAvatars, [username]: avatarId }
+        }));
+    });
     
     socket.on('receive_message', (message) => {
       const { currentRoom, messageCache, user } = get();
@@ -160,6 +194,21 @@ export const useChatStore = create((set, get) => ({
     window.location.reload();
   },
 
+  updateAvatar: (avatarId) => {
+    return new Promise((resolve) => {
+      socket.emit('update_avatar', avatarId, (response) => {
+        if (response.success) {
+          set((state) => ({
+            user: { ...state.user, avatarId: response.avatarId }
+          }));
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, error: response.error });
+        }
+      });
+    });
+  },
+
   createRoom: (name) => {
     return new Promise((resolve) => {
       socket.emit('create_room', name, ({ success, roomId }) => {
@@ -184,6 +233,13 @@ export const useChatStore = create((set, get) => ({
           // Save last room for auto-rejoin
           localStorage.setItem('last_room_id', roomId);
           
+          // Clear unread count for this room
+          set((state) => ({
+              rooms: state.rooms.map(r => 
+                  r.id === roomId ? { ...r, unreadCount: 0 } : r
+              )
+          }));
+
           // Use server history, or fallback to local cache
           const serverMessages = (history || []).map(msg => ({
             ...msg,
@@ -213,13 +269,30 @@ export const useChatStore = create((set, get) => ({
     }
     socket.emit('leave_room');
     localStorage.removeItem('last_room_id');
-    set({ currentRoom: null, messages: [] });
+    set({ currentRoom: null, messages: [], replyingTo: null });
   },
 
+  setReplyingTo: (message) => set({ replyingTo: message }),
+
   sendMessage: (text) => {
-    const { currentRoom } = get();
+    const { currentRoom, replyingTo } = get();
     if (!currentRoom) return;
-    socket.emit('send_message', { roomId: currentRoom.id, message: text });
+    
+    // Prepare reply data if exists
+    const replyData = replyingTo ? {
+        id: replyingTo.id,
+        text: replyingTo.text,
+        sender: replyingTo.sender
+    } : null;
+
+    socket.emit('send_message', { 
+        roomId: currentRoom.id, 
+        message: text,
+        replyTo: replyData 
+    });
+    
+    // Clear reply state
+    set({ replyingTo: null });
   },
 
   dismissRoom: (roomId) => {

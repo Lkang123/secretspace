@@ -114,9 +114,14 @@ io.on('connection', (socket) => {
         password,
         persistentId,
         isAdmin,
-        joinedRooms: []
+        joinedRooms: [],
+        avatarId: null // Default: use username-based avatar
       });
     }
+
+    // Get avatarId for response
+    const userCred = userCredentials.get(username);
+    const avatarId = userCred?.avatarId ?? null;
 
     // Store session for this socket
     users.set(socket.id, {
@@ -124,6 +129,7 @@ io.on('connection', (socket) => {
       username,
       persistentId,
       isAdmin,
+      avatarId,
       currentRoom: null
     });
 
@@ -134,13 +140,41 @@ io.on('connection', (socket) => {
       user: { 
         id: persistentId, 
         username, 
-        isAdmin 
+        isAdmin,
+        avatarId
       } 
     });
 
     // Send user's joined rooms
     socket.emit('rooms_updated', getUserRooms(persistentId));
     console.log('User logged in');
+  });
+
+  // 1.5 Update Avatar
+  socket.on('update_avatar', (avatarId, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    // Update in credentials
+    const cred = userCredentials.get(user.username);
+    if (cred) {
+      cred.avatarId = avatarId;
+    }
+
+    // Update in session
+    user.avatarId = avatarId;
+    users.set(socket.id, user);
+
+    // Broadcast to all users that this user changed avatar
+    io.emit('user_avatar_updated', {
+      username: user.username,
+      avatarId: avatarId
+    });
+
+    if (callback) callback({ success: true, avatarId });
+    console.log(`User ${user.username} updated avatar to ${avatarId}`);
   });
 
   // 2. Create Room
@@ -287,7 +321,7 @@ io.on('connection', (socket) => {
   });
 
   // 5. Send Message
-  socket.on('send_message', ({ message, roomId }) => {
+  socket.on('send_message', ({ message, roomId, replyTo }) => {
     const user = users.get(socket.id);
     // Verify user is actually in the room
     if (user.currentRoom !== roomId) return;
@@ -297,8 +331,10 @@ io.on('connection', (socket) => {
       text: message,
       sender: user.username,
       senderId: user.persistentId,
+      senderAvatarId: user.avatarId ?? null, // Include avatar ID
       isAdmin: user.isAdmin,
       timestamp: new Date().toISOString(),
+      replyTo: replyTo || null // Add replyTo field
     };
 
     // Store in history (limit to 100 messages per room)
@@ -312,6 +348,22 @@ io.on('connection', (socket) => {
     }
 
     io.to(roomId).emit('receive_message', msgData);
+
+    // Notify users who are members of this room but NOT currently inside
+    for (const [socketId, socketUser] of users.entries()) {
+        // Skip if user is in the room (they already got receive_message)
+        if (socketUser.currentRoom === roomId) continue;
+
+        // Check if user has joined this room
+        const cred = userCredentials.get(socketUser.username);
+        if (cred && cred.joinedRooms && cred.joinedRooms.includes(roomId)) {
+            io.to(socketId).emit('room_notification', {
+                roomId,
+                lastMessage: message,
+                timestamp: msgData.timestamp
+            });
+        }
+    }
   });
 
   // 6. Dismiss Room (Admin or Owner only)

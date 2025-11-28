@@ -2,17 +2,19 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '../store';
 import { useThemeStore } from '../themeStore';
-import { Plus, Hash, Trash2, LogOut, Sun, Moon } from 'lucide-react';
+import { Plus, Hash, Trash2, LogOut, Sun, Moon, X } from 'lucide-react';
 import clsx from 'clsx';
 import Modal from './Modal';
+import { getAvatarColor, getInitials, getAvatarUrl, PRESET_AVATARS, getPresetAvatarUrl } from '../utils';
 
 export default function Sidebar() {
-  const { rooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout } = useChatStore();
+  const { rooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar } = useChatStore();
   const { theme, toggleTheme } = useThemeStore();
   const [isCreating, setIsCreating] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'join'
   const [inputValue, setInputValue] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, roomId: null, roomName: '' });
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,11 +38,20 @@ export default function Sidebar() {
       <div className="p-4 backdrop-blur-md bg-white/50 dark:bg-zinc-900/50">
         <div className="flex items-center justify-between px-2 mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-zinc-900 dark:bg-white flex items-center justify-center">
-              <span className="text-sm font-bold text-white dark:text-black">
-                {user?.username?.slice(0, 2).toUpperCase()}
-              </span>
-            </div>
+            <button 
+              onClick={() => setShowAvatarPicker(true)}
+              className="relative group"
+              title="Change avatar"
+            >
+              <img 
+                src={getPresetAvatarUrl(user?.avatarId, user?.username)} 
+                alt={user?.username}
+                className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700 cursor-pointer ring-2 ring-transparent group-hover:ring-zinc-400 dark:group-hover:ring-zinc-500 transition-all"
+              />
+              <div className="absolute inset-0 rounded-full bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span className="text-white text-[10px] font-medium">Edit</span>
+              </div>
+            </button>
             <div className="flex flex-col">
               <span className="text-[15px] font-bold text-zinc-900 dark:text-white leading-tight">
                 {user?.username}
@@ -120,35 +131,52 @@ export default function Sidebar() {
                 <button
                   onClick={() => joinRoom(room.id)}
                   className={clsx(
-                    "flex-1 h-12 flex items-center gap-3 px-3 rounded-full text-left transition-all duration-200 backdrop-blur-md",
+                    "group/btn flex-1 h-12 flex items-center justify-between px-3 rounded-full transition-all duration-200 backdrop-blur-md relative overflow-hidden",
                     isActive 
                       ? "bg-zinc-100/70 dark:bg-zinc-800/70 text-zinc-900 dark:text-white font-bold shadow-sm" 
                       : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                   )}
                 >
-                  <Hash size={20} className="shrink-0" />
-                  <span className="flex-1 text-[15px] truncate">{room.name}</span>
+                  {/* Left: Icon + Name + Count */}
+                  <div className="flex items-center gap-3 overflow-hidden flex-1">
+                    <div className={clsx(
+                      "w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                      isActive ? "bg-zinc-900 dark:bg-white text-white dark:text-black" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                    )}>
+                        <Hash size={14} />
+                    </div>
+                    <div className="flex flex-col overflow-hidden">
+                        <span className="truncate text-[14px] font-medium leading-tight">{room.name}</span>
+                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                            {room.userCount} {room.userCount === 1 ? 'member' : 'members'}
+                        </span>
+                    </div>
+                  </div>
+
+                  {/* Right: Badges + Actions */}
+                  <div className="flex items-center gap-1 pl-2 shrink-0">
+                    {/* Unread Count */}
+                    {room.unreadCount > 0 && (
+                      <span className="min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-bold rounded-full bg-red-500 text-white shadow-sm">
+                        {room.unreadCount > 99 ? '99+' : room.unreadCount}
+                      </span>
+                    )}
+
+                    {/* Delete Button (Hover only) */}
+                    {canDelete && (
+                      <div
+                        role="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteModal({ open: true, roomId: room.id, roomName: room.name });
+                        }}
+                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 -mr-1"
+                      >
+                        <Trash2 size={14} />
+                      </div>
+                    )}
+                  </div>
                 </button>
-
-                {/* User Count - Always Visible */}
-                {room.userCount > 0 && (
-                  <span className="min-w-[24px] h-6 flex items-center justify-center text-xs font-bold rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black mx-2 flex-shrink-0">
-                    {room.userCount}
-                  </span>
-                )}
-
-                {/* Delete Button - Hover Only */}
-                {canDelete && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteModal({ open: true, roomId: room.id, roomName: room.name });
-                    }}
-                    className="p-2 rounded-full text-zinc-400 dark:text-zinc-600 opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500 transition-all flex-shrink-0"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
               </motion.div>
             );
           })}
@@ -176,6 +204,65 @@ export default function Sidebar() {
         confirmText="Delete"
         confirmVariant="danger"
       />
+
+      {/* Avatar Picker Modal */}
+      <AnimatePresence>
+        {showAvatarPicker && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowAvatarPicker(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[360px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Choose Avatar</h3>
+                <button
+                  onClick={() => setShowAvatarPicker(false)}
+                  className="p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  <X size={20} className="text-zinc-500" />
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-5 gap-2">
+                {PRESET_AVATARS.map((seed, index) => (
+                  <button
+                    key={seed}
+                    onClick={async () => {
+                      await updateAvatar(index);
+                      setShowAvatarPicker(false);
+                    }}
+                    className={clsx(
+                      "w-14 h-14 rounded-full overflow-hidden ring-2 transition-all hover:scale-110",
+                      user?.avatarId === index 
+                        ? "ring-blue-500" 
+                        : "ring-transparent hover:ring-zinc-300 dark:hover:ring-zinc-600"
+                    )}
+                  >
+                    <img 
+                      src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`}
+                      alt={seed}
+                      className="w-full h-full bg-zinc-200 dark:bg-zinc-700"
+                    />
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-xs text-zinc-500 text-center mt-4">
+                Click an avatar to select it
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
