@@ -8,7 +8,7 @@ import ChatArea from './components/ChatArea';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
 
 function App() {
-  const { user, initSocket, connected, showWelcomeModal, closeWelcomeModal } = useChatStore();
+  const { user, initSocket, connected, showWelcomeModal, closeWelcomeModal, isRestoring } = useChatStore();
   const { theme } = useThemeStore();
 
   useEffect(() => {
@@ -22,12 +22,15 @@ function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  if (!connected) {
+  // Show loading state while connecting or restoring session
+  if (!connected || isRestoring) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
         <div className="flex flex-col items-center gap-3">
           <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Connecting...</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {!connected ? 'Connecting...' : 'Restoring session...'}
+          </p>
         </div>
       </div>
     );

@@ -4,6 +4,9 @@ import { io } from 'socket.io-client';
 const socket = io();
 let isInitialized = false; // Prevent duplicate listeners from StrictMode
 
+// Check if there's a saved session (to determine initial restoring state)
+const hasSavedSession = !!localStorage.getItem('chat_session');
+
 export const useChatStore = create((set, get) => ({
   socket,
   user: null,
@@ -13,6 +16,7 @@ export const useChatStore = create((set, get) => ({
   messageCache: {}, // Cache messages per room: { roomId: [messages] }
   connected: false,
   showWelcomeModal: false,
+  isRestoring: hasSavedSession, // True if we have a session to restore
   
   closeWelcomeModal: () => {
     const { user } = get();
@@ -38,6 +42,8 @@ export const useChatStore = create((set, get) => ({
         // If user is already set (from memory), we might not need to login again, 
         // but socket needs to be re-associated with the user data on server.
         get().login(username, password, true).then((result) => {
+            // Session restore complete
+            set({ isRestoring: false });
             if (result.success) {
                 // Auto-join last room
                 const lastRoomId = localStorage.getItem('last_room_id');
@@ -46,6 +52,9 @@ export const useChatStore = create((set, get) => ({
                 }
             }
         });
+      } else {
+        // No session to restore
+        set({ isRestoring: false });
       }
     });
 
