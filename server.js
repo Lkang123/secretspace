@@ -189,7 +189,24 @@ io.on('connection', (socket) => {
 
     // Leave current room if any (Socket.io logic)
     if (user.currentRoom) {
-      socket.leave(user.currentRoom);
+      const oldRoomId = user.currentRoom;
+      socket.leave(oldRoomId);
+      
+      // Notify others in the OLD room that user left
+      socket.to(oldRoomId).emit('system_message', {
+        text: `${user.username} left the room.`
+      });
+
+      // Update room counts for users remaining in the OLD room
+      const socketsInOldRoom = io.sockets.adapter.rooms.get(oldRoomId);
+      if (socketsInOldRoom) {
+        socketsInOldRoom.forEach(socketId => {
+          const roomUser = users.get(socketId);
+          if (roomUser) {
+            io.to(socketId).emit('rooms_updated', getUserRooms(roomUser.persistentId));
+          }
+        });
+      }
     }
 
     socket.join(roomId);
