@@ -386,12 +386,33 @@ export default function ChatArea() {
                   <Smile size={18} />
                 </button>
                 {showEmojiPicker && (
-                  <div className="absolute bottom-11 right-0 z-50">
-                    <EmojiPicker
-                      onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
-                      lazyLoadEmojis
+                  <>
+                    {/* Mobile: Overlay background */}
+                    <div 
+                      className="fixed inset-0 bg-black/30 z-40 md:hidden"
+                      onClick={() => setShowEmojiPicker(false)}
                     />
-                  </div>
+                    
+                    {/* Desktop: Absolute positioning */}
+                    <div className="hidden md:block absolute bottom-11 right-0 z-50">
+                      <EmojiPicker
+                        onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
+                        lazyLoadEmojis
+                        width={350}
+                        height={400}
+                      />
+                    </div>
+                    
+                    {/* Mobile: Fixed centered modal */}
+                    <div className="md:hidden fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90vw] max-w-[350px]">
+                      <EmojiPicker
+                        onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
+                        lazyLoadEmojis
+                        width="100%"
+                        height={350}
+                      />
+                    </div>
+                  </>
                 )}
               </div>
             </div>
