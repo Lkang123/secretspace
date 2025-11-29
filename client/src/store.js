@@ -907,14 +907,14 @@ export const useChatStore = create((set, get) => ({
     try {
       const formData = new FormData();
       formData.append('image', file);
-      
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData
       });
-      
+
       const result = await response.json();
-      
+
       if (result.success) {
         // 发送图片消息
         socket.emit('send_message', {
@@ -923,16 +923,22 @@ export const useChatStore = create((set, get) => ({
           imageUrl: result.imageUrl,
           replyTo: null
         });
-        
+
         set({ uploadingImage: false, pendingImage: null });
         return { success: true };
       } else {
         set({ uploadingImage: false });
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.error('图片上传失败');
+        }
         return { success: false, error: result.error };
       }
     } catch (err) {
       console.error('Upload error:', err);
       set({ uploadingImage: false });
+      toast.error('图片上传失败');
       return { success: false, error: '上传失败' };
     }
   },
@@ -947,14 +953,14 @@ export const useChatStore = create((set, get) => ({
     try {
       const formData = new FormData();
       formData.append('image', file);
-      
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData
       });
-      
+
       const result = await response.json();
-      
+
       if (result.success) {
         // 发送图片消息
         socket.emit('send_dm', {
@@ -963,16 +969,22 @@ export const useChatStore = create((set, get) => ({
           imageUrl: result.imageUrl,
           replyTo: null
         });
-        
+
         set({ uploadingImage: false, pendingImage: null });
         return { success: true };
       } else {
         set({ uploadingImage: false });
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.error('图片上传失败');
+        }
         return { success: false, error: result.error };
       }
     } catch (err) {
       console.error('Upload error:', err);
       set({ uploadingImage: false });
+      toast.error('图片上传失败');
       return { success: false, error: '上传失败' };
     }
   }
