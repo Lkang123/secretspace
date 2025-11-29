@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
+import toast from 'react-hot-toast';
 
 const socket = io();
 let isInitialized = false; // Prevent duplicate listeners from StrictMode
@@ -24,6 +25,9 @@ export const useChatStore = create((set, get) => ({
   userAvatars: {}, // Cache: { username: avatarId }
   roomDismissedInfo: null, // { roomName, message } when a room is dismissed
   roomBanner: null, // { message, createdAt, createdBy } current room's banner
+  forceLogoutMessage: null, // { reason } or null - for when user is deleted by admin
+  kickedFromRoom: null, // { roomName, reason } or null - for when kicked from room
+  kickCooldownInfo: null, // { roomName, error } or null - for when trying to join but still in cooldown
   
   closeWelcomeModal: () => {
     const { user } = get();
@@ -50,6 +54,14 @@ export const useChatStore = create((set, get) => ({
 
   closeRoomDismissedModal: () => {
     set({ roomDismissedInfo: null });
+  },
+
+  closeKickedModal: () => {
+    set({ kickedFromRoom: null });
+  },
+
+  closeKickCooldownModal: () => {
+    set({ kickCooldownInfo: null });
   },
 
   // Actions
@@ -90,7 +102,8 @@ export const useChatStore = create((set, get) => ({
         const existingRoomsMap = new Map(state.rooms.map(r => [r.id, r]));
         const mergedRooms = newRooms.map(newRoom => ({
           ...newRoom,
-          unreadCount: existingRoomsMap.get(newRoom.id)?.unreadCount || 0
+          unreadCount: existingRoomsMap.get(newRoom.id)?.unreadCount || 0,
+          cooldownUntil: newRoom.cooldown ? Date.now() + newRoom.cooldown * 1000 : null
         }));
         return { rooms: mergedRooms };
       });
@@ -122,6 +135,30 @@ export const useChatStore = create((set, get) => ({
     // Listen for room banner updates
     socket.on('room_banner_updated', (banner) => {
         set({ roomBanner: banner });
+    });
+
+    // Listen for force logout (when admin deletes user)
+    socket.on('force_logout', ({ reason }) => {
+      console.log('=== FORCE LOGOUT EVENT RECEIVED ===');
+      console.log('Reason:', reason);
+      console.log('Current user:', get().user);
+      
+      // Immediately clear localStorage to prevent auto re-login
+      localStorage.removeItem('chat_session');
+      localStorage.removeItem('last_room_id');
+      console.log('localStorage cleared');
+      
+      // Set force logout message to show modal
+      set({ 
+        forceLogoutMessage: { reason: reason || '您已被管理员强制下线' },
+        user: null,
+        currentRoom: null,
+        messages: [],
+        rooms: [],
+      });
+      
+      console.log('forceLogoutMessage set:', { reason: reason || '您已被管理员强制下线' });
+      console.log('=== FORCE LOGOUT HANDLER COMPLETE ===');
     });
     
     socket.on('receive_message', (message) => {
@@ -166,26 +203,87 @@ export const useChatStore = create((set, get) => ({
       });
     });
 
-    socket.on('room_dismissed', ({ text, roomName }) => {
-        const { currentRoom, messageCache } = get();
+    // Listen for being kicked from room
+    socket.on('kicked_from_room', ({ roomName, reason }) => {
+      console.log('Kicked from room:', roomName, reason);
+      // Show notification
+      const currentRoom = get().currentRoom;
+      if (currentRoom) {
+        set({ 
+          currentRoom: null,
+          messages: [],
+          roomBanner: null,
+          kickedFromRoom: { roomName, reason }
+        });
+        localStorage.removeItem('last_room_id');
+      }
+    });
+
+    socket.on('room_dismissed', ({ text, roomName, roomId }) => {
+        const { currentRoom, messageCache, rooms } = get();
         // Remove from cache and storage
         const newCache = { ...messageCache };
         if (currentRoom) {
           delete newCache[currentRoom.id];
         }
+        
         localStorage.removeItem('last_room_id');
-        // Show dismissed notification to user
+        
+        // Find the room ID if not provided (fallback)
+        const idToRemove = roomId || (rooms.find(r => r.name === roomName)?.id);
+
         set({ 
-          currentRoom: null, 
-          messages: [], 
+          currentRoom: null,
+          messages: [],
+          roomBanner: null,
+          roomDismissedInfo: { roomName, message: text },
           messageCache: newCache,
-          roomDismissedInfo: { roomName: roomName || currentRoom?.name, message: text }
+          // Remove the dismissed room from the list using ID
+          rooms: idToRemove ? rooms.filter(r => r.id !== idToRemove) : rooms
+        });
+        
+        // Also fetch fresh list from server just in case
+        socket.emit('get_rooms', (updatedRooms) => {
+           set({ rooms: updatedRooms || [] });
         });
     });
 
+    // Listen for admin room updates (real-time user count)
+    socket.on('admin_room_updated', ({ roomId, userCount }) => {
+      set((state) => ({
+        adminRooms: state.adminRooms.map(room => 
+          room.id === roomId ? { ...room, userCount } : room
+        )
+      }));
+    });
+
     // Initial fetch
-    socket.emit('get_rooms', (rooms) => set({ rooms }));
+    socket.emit('get_rooms', (rooms) => {
+        // Process cooldowns into timestamps
+        const processedRooms = rooms.map(r => ({
+            ...r,
+            cooldownUntil: r.cooldown ? Date.now() + r.cooldown * 1000 : null
+        }));
+        set({ rooms: processedRooms });
+    });
   },
+
+  // ...
+
+  // Helper to process rooms from server updates
+  processRoomsUpdate: (rooms) => {
+      return rooms.map(r => ({
+          ...r,
+          cooldownUntil: r.cooldown ? Date.now() + r.cooldown * 1000 : null
+      }));
+  },
+
+  // ... 
+
+  // Need to update all set({ rooms }) calls to use processing
+  // Actually, easiest way is to intercept the socket listeners or just do it inline
+  // Let's update the listeners
+
 
   login: (username, password, isAutoLogin = false) => {
     return new Promise((resolve) => {
@@ -295,11 +393,20 @@ export const useChatStore = create((set, get) => ({
           set({ currentRoom: room, messages: serverMessages, roomBanner: banner || null });
           resolve({ success: true });
         } else {
-          // If join failed (e.g. room deleted), clear storage
-          if (error === 'Room not found') {
-              localStorage.removeItem('last_room_id');
+          // If join failed due to kick cooldown, show modal
+          if (error && error.includes('分钟后再试')) {
+            // Find the room name from rooms list
+            const targetRoom = get().rooms.find(r => r.id === roomId);
+            const roomName = targetRoom ? targetRoom.name : '该房间';
+            set({ kickCooldownInfo: { roomName, error } });
+            resolve({ success: false, error });
+          } else {
+            // Other errors (e.g. room deleted), clear storage
+            if (error === 'Room not found') {
+                localStorage.removeItem('last_room_id');
+            }
+            resolve({ success: false, error });
           }
-          resolve({ success: false, error });
         }
       });
     });
@@ -416,5 +523,27 @@ export const useChatStore = create((set, get) => ({
             }
         });
       });
+  },
+
+  adminDeleteUser: (username) => {
+    return new Promise((resolve) => {
+        const { user } = get();
+        if (!user?.isAdmin) return resolve({ success: false, error: 'Permission denied' });
+        
+        socket.emit('admin_delete_user', { username }, (response) => {
+            resolve(response);
+        });
+    });
+  },
+
+  adminKickUser: (roomId, username) => {
+    return new Promise((resolve) => {
+        const { user } = get();
+        if (!user?.isAdmin) return resolve({ success: false, error: 'Permission denied' });
+        
+        socket.emit('admin_kick_user', { roomId, username }, (response) => {
+            resolve(response);
+        });
+    });
   }
 }));

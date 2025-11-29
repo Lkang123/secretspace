@@ -5,7 +5,8 @@ import { useThemeStore } from './themeStore';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
-import { AlertTriangle, CheckCircle, X, Shield, Trash2, Users, Edit2, Key, LogIn } from 'lucide-react';
+import { AlertTriangle, CheckCircle, X, Shield, Trash2, Users, Edit2, Key, LogIn, UserX, Crown } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
 
 function App() {
   const { 
@@ -26,7 +27,14 @@ function App() {
     closeRoomDismissedModal,
     fetchAdminUsers,
     adminUpdateUser,
-    fetchRoomUsers
+    fetchRoomUsers,
+    adminDeleteUser,
+    adminKickUser,
+    forceLogoutMessage,
+    kickedFromRoom,
+    closeKickedModal,
+    kickCooldownInfo,
+    closeKickCooldownModal
   } = useChatStore();
   const { theme } = useThemeStore();
   
@@ -41,10 +49,17 @@ function App() {
   const [editPassword, setEditPassword] = useState('');
   const [viewingRoomUsers, setViewingRoomUsers] = useState(null); // Room ID whose users we are viewing
   const [roomUsersList, setRoomUsersList] = useState([]);
+  const [deleteUserConfirm, setDeleteUserConfirm] = useState({ step: 0, user: null }); // 0: closed, 1-2: confirmation steps
+  const [kickUserConfirm, setKickUserConfirm] = useState({ open: false, roomId: null, username: null }); // Kick user confirmation
 
   useEffect(() => {
     initSocket();
   }, [initSocket]);
+
+  // Debug: Monitor forceLogoutMessage changes
+  useEffect(() => {
+    console.log('forceLogoutMessage changed:', forceLogoutMessage);
+  }, [forceLogoutMessage]);
 
   // Apply theme class to html element
   useEffect(() => {
@@ -82,26 +97,164 @@ function App() {
       }
   };
 
+  const handleDeleteUser = async () => {
+    if (!deleteUserConfirm.user) return;
+    
+    const username = deleteUserConfirm.user.username;
+    console.log('Deleting user:', username);
+    
+    try {
+      const result = await adminDeleteUser(username);
+      console.log('Delete result:', result);
+      
+      if (result.success) {
+        toast.success(`用户 ${username} 已被删除`, {
+          duration: 3000,
+        });
+        setDeleteUserConfirm({ step: 0, user: null });
+        
+        // Refresh user list
+        console.log('Refreshing user list...');
+        const users = await fetchAdminUsers();
+        console.log('Updated user list:', users);
+        setAdminUsers(users || []);
+      } else {
+        console.error('Delete failed:', result.error);
+        toast.error(result.error || '删除失败', {
+          duration: 3000,
+        });
+      }
+    } catch (err) {
+      console.error('Delete user error:', err);
+      toast.error('删除失败：网络错误', {
+        duration: 3000,
+      });
+    }
+  };
+
+  const handleForceLogoutConfirm = () => {
+    // Clear all localStorage
+    localStorage.removeItem('chat_session');
+    localStorage.removeItem('last_room_id');
+    // Reload page to show login screen
+    window.location.reload();
+  };
+
+  const handleKickUserConfirm = async () => {
+    const { roomId, username } = kickUserConfirm;
+    if (!roomId || !username) return;
+    
+    try {
+      const result = await adminKickUser(roomId, username);
+      if (result.success) {
+        toast.success(`已将 ${username} 踢出房间`);
+        setKickUserConfirm({ open: false, roomId: null, username: null });
+        
+        // Refresh room users list
+        const users = await fetchRoomUsers(roomId);
+        
+        // If room is now empty (dismissed), close the modal and refresh room list
+        if (!users || users.length === 0) {
+          setViewingRoomUsers(null);
+          setRoomUsersList([]);
+          // Refresh admin room list (updates adminRooms in store)
+          fetchAdminRooms();
+        } else {
+          // Room still has users, update the list
+          setRoomUsersList(users);
+        }
+      } else {
+        toast.error(result.error || '踢人失败');
+      }
+    } catch (err) {
+      console.error('Kick user error:', err);
+      toast.error('踢人失败：网络错误');
+    }
+  };
+
+  // Render Force Logout Modal at the top level (before user check)
+  console.log('Rendering forceLogoutModal, message:', forceLogoutMessage);
+  const forceLogoutModal = (
+    <AnimatePresence>
+      {forceLogoutMessage && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-full max-w-[420px] shadow-2xl border-2 border-red-500"
+          >
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center mb-4">
+                <AlertTriangle size={32} className="text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">
+                账号已被删除
+              </h3>
+              <p className="text-base text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                {forceLogoutMessage.reason}
+              </p>
+            </div>
+
+            <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4 mb-5">
+              <p className="text-sm text-red-800 dark:text-red-300 text-center">
+                您的账号信息已被清除，将返回登录页面。
+              </p>
+            </div>
+
+            <button
+              onClick={handleForceLogoutConfirm}
+              className="w-full h-12 rounded-full bg-red-600 text-white font-bold hover:bg-red-700 transition-colors text-base"
+            >
+              确认
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   // Show loading state while connecting or restoring session
   if (!connected) {
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Connecting...
-          </p>
+      <>
+        {forceLogoutModal}
+        <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              Connecting...
+            </p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   if (!user) {
-    return <Login />;
+    return (
+      <>
+        {forceLogoutModal}
+        <Login />
+      </>
+    );
   }
 
   return (
     <>
+      {forceLogoutModal}
+      <Toaster 
+        position="top-center"
+        containerStyle={{
+          top: '50%',
+          transform: 'translateY(-50%)',
+        }}
+      />
       <div className="h-screen flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300">
         <Sidebar />
         <ChatArea />
@@ -350,9 +503,19 @@ function App() {
                                         setEditPassword(u.password);
                                     }}
                                     className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 transition-colors"
+                                    title="编辑用户"
                                 >
                                     <Edit2 size={14} />
                                 </button>
+                                {!u.isAdmin && (
+                                    <button
+                                        onClick={() => setDeleteUserConfirm({ step: 1, user: u })}
+                                        className="p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 transition-colors"
+                                        title="删除用户"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -437,20 +600,32 @@ function App() {
                             <p className="text-center text-xs text-zinc-500 py-4">房间空空如也</p>
                         ) : (
                             roomUsersList.map((u, i) => (
-                                <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                                        {u.username.slice(0, 2).toUpperCase()}
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-sm font-medium text-zinc-900 dark:text-white">{u.username}</span>
-                                            {u.isAdmin && <Shield size={10} className="text-amber-500" />}
+                                <div key={i} className="flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                                            {u.username.slice(0, 2).toUpperCase()}
                                         </div>
-                                        <span className="text-[10px] text-zinc-400">
-                                            {u.realUsername !== u.username ? `(Real: ${u.realUsername})` : ''} 
-                                            {u.isStealth ? ' [隐身]' : ''}
-                                        </span>
+                                        <div className="flex flex-col">
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-sm font-medium text-zinc-900 dark:text-white">{u.username}</span>
+                                                {u.isOwner && <Crown size={12} className="text-yellow-500" title="房主" />}
+                                                {u.isAdmin && <Shield size={10} className="text-amber-500" title="管理员" />}
+                                            </div>
+                                            <span className="text-[10px] text-zinc-400">
+                                                {u.realUsername !== u.username ? `(Real: ${u.realUsername})` : ''} 
+                                                {u.isStealth ? ' [隐身]' : ''}
+                                            </span>
+                                        </div>
                                     </div>
+                                    {!u.isAdmin && (
+                                        <button
+                                            onClick={() => setKickUserConfirm({ open: true, roomId: viewingRoomUsers, username: u.realUsername })}
+                                            className="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 transition-colors"
+                                            title="踢出房间"
+                                        >
+                                            <UserX size={14} />
+                                        </button>
+                                    )}
                                 </div>
                             ))
                         )}
@@ -556,6 +731,260 @@ function App() {
 
               <button
                 onClick={closeRoomDismissedModal}
+                className="w-full h-11 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black font-bold hover:bg-black dark:hover:bg-zinc-200 transition-colors"
+              >
+                我知道了
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete User - Three Step Confirmation Modal */}
+      <AnimatePresence>
+        {deleteUserConfirm.step > 0 && deleteUserConfirm.user && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setDeleteUserConfirm({ step: 0, user: null })}
+          >
+            <motion.div
+              key={deleteUserConfirm.step}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[400px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {deleteUserConfirm.step === 1 && (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">
+                      <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div className="flex flex-col">
+                      <h3 className="text-lg font-bold text-zinc-900 dark:text-white">确认删除用户？</h3>
+                      <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                        第一次确认 (1/2)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4 mb-4">
+                    <p className="text-[13px] text-amber-800 dark:text-amber-300">
+                      即将删除用户：<span className="font-bold">{deleteUserConfirm.user.username}</span>
+                    </p>
+                    <p className="text-[12px] text-amber-700 dark:text-amber-400 mt-2">
+                      该用户将被强制下线，所有数据将被清除。
+                    </p>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setDeleteUserConfirm({ step: 0, user: null })}
+                      className="flex-1 h-11 rounded-full border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => setDeleteUserConfirm({ ...deleteUserConfirm, step: 2 })}
+                      className="flex-1 h-11 rounded-full bg-amber-500 text-white font-bold hover:bg-amber-600 transition-colors"
+                    >
+                      继续 (1/2)
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {deleteUserConfirm.step === 2 && (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center">
+                      <Trash2 size={20} className="text-red-600 dark:text-red-400" />
+                    </div>
+                    <div className="flex flex-col">
+                      <h3 className="text-lg font-bold text-zinc-900 dark:text-white">最后确认！</h3>
+                      <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                        第二次确认 (2/2)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-red-50 dark:bg-red-500/10 border-2 border-red-300 dark:border-red-500/40 rounded-xl p-4 mb-4">
+                    <p className="text-[14px] text-red-800 dark:text-red-300 font-bold mb-3">
+                      🚨 危险操作警告
+                    </p>
+                    <p className="text-[13px] text-red-700 dark:text-red-400 leading-relaxed">
+                      您即将<span className="font-bold underline">永久删除</span>用户 <span className="font-bold text-red-900 dark:text-red-200">{deleteUserConfirm.user.username}</span>。
+                    </p>
+                    <p className="text-[12px] text-red-600 dark:text-red-400 mt-3 font-medium">
+                      此操作无法撤销，请三思而后行！
+                    </p>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setDeleteUserConfirm({ step: 0, user: null })}
+                      className="flex-1 h-11 rounded-full border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleDeleteUser}
+                      className="flex-1 h-11 rounded-full bg-red-600 text-white font-bold hover:bg-red-700 transition-colors"
+                    >
+                      确认删除 (2/2)
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Kick User Confirmation Modal */}
+      <AnimatePresence>
+        {kickUserConfirm.open && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setKickUserConfirm({ open: false, roomId: null, username: null })}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[380px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-500/20 flex items-center justify-center">
+                  <UserX size={20} className="text-orange-600 dark:text-orange-400" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-bold text-zinc-900 dark:text-white">确认踢出用户？</h3>
+                  <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    此操作将立即生效
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/30 rounded-xl p-4 mb-4">
+                <p className="text-[13px] text-orange-800 dark:text-orange-300">
+                  将 <span className="font-bold">{kickUserConfirm.username}</span> 踢出房间
+                </p>
+                <p className="text-[12px] text-orange-700 dark:text-orange-400 mt-2">
+                  用户将立即离开房间，但账号仍然保留，可以重新加入。
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setKickUserConfirm({ open: false, roomId: null, username: null })}
+                  className="flex-1 h-11 rounded-full border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleKickUserConfirm}
+                  className="flex-1 h-11 rounded-full bg-orange-500 text-white font-bold hover:bg-orange-600 transition-colors"
+                >
+                  确认踢出
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Kicked from Room Notification Modal */}
+      <AnimatePresence>
+        {kickedFromRoom && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={closeKickedModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[380px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">
+                  <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-bold text-zinc-900 dark:text-white">已被移出房间</h3>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4 mb-4">
+                <p className="text-[13px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                  {kickedFromRoom.reason}
+                </p>
+                <p className="text-[12px] text-amber-700 dark:text-amber-400 mt-2">
+                  房间：<span className="font-semibold">{kickedFromRoom.roomName}</span>
+                </p>
+              </div>
+
+              <button
+                onClick={closeKickedModal}
+                className="w-full h-11 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black font-bold hover:bg-black dark:hover:bg-zinc-200 transition-colors"
+              >
+                我知道了
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Kick Cooldown Modal - When trying to join but still in cooldown */}
+      <AnimatePresence>
+        {kickCooldownInfo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={closeKickCooldownModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[380px] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center">
+                  <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-bold text-zinc-900 dark:text-white">无法加入房间</h3>
+                </div>
+              </div>
+
+              <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4 mb-4">
+                <p className="text-[13px] text-red-800 dark:text-red-300 font-medium mb-2">
+                  房间：<span className="font-bold">{kickCooldownInfo.roomName}</span>
+                </p>
+                <p className="text-[13px] text-red-700 dark:text-red-400 leading-relaxed">
+                  {kickCooldownInfo.error}
+                </p>
+              </div>
+
+              <button
+                onClick={closeKickCooldownModal}
                 className="w-full h-11 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black font-bold hover:bg-black dark:hover:bg-zinc-200 transition-colors"
               >
                 我知道了

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '../store';
 import { useThemeStore } from '../themeStore';
-import { Plus, Hash, Trash2, LogOut, Sun, Moon, X, Shield } from 'lucide-react';
+import { Plus, Hash, Trash2, LogOut, Sun, Moon, X, Shield, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import Modal from './Modal';
 import { getAvatarColor, getInitials, getAvatarUrl, PRESET_AVATARS, getPresetAvatarUrl } from '../utils';
@@ -15,6 +15,12 @@ export default function Sidebar() {
   const [inputValue, setInputValue] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, roomId: null, roomName: '' });
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -131,6 +137,12 @@ export default function Sidebar() {
           {rooms.map((room) => {
             const isActive = currentRoom?.id === room.id;
             const canDelete = user?.isAdmin || room.ownerId === user?.id;
+            
+            const isCooldown = room.cooldownUntil && room.cooldownUntil > now;
+            const cooldownSeconds = isCooldown ? Math.ceil((room.cooldownUntil - now) / 1000) : 0;
+            const cooldownText = isCooldown 
+              ? `${Math.floor(cooldownSeconds / 60)}:${(cooldownSeconds % 60).toString().padStart(2, '0')}` 
+              : null;
 
             return (
               <motion.div
@@ -141,27 +153,46 @@ export default function Sidebar() {
                 className="group relative flex items-center"
               >
                 <button
-                  onClick={() => joinRoom(room.id)}
+                  onClick={() => {
+                    if (isCooldown) {
+                       // Show cooldown modal logic is in store/App via joinRoom, 
+                       // but joinRoom handles emitting which returns error.
+                       // We can just call joinRoom and let it fail (which shows modal), 
+                       // OR prevent it here.
+                       // Let's call joinRoom so it triggers the nice modal in App.jsx
+                       joinRoom(room.id);
+                    } else {
+                       joinRoom(room.id);
+                    }
+                  }}
                   className={clsx(
                     "group/btn flex-1 h-12 flex items-center justify-between px-3 rounded-full transition-all duration-200 backdrop-blur-md relative overflow-hidden",
                     isActive 
                       ? "bg-zinc-100/70 dark:bg-zinc-800/70 text-zinc-900 dark:text-white font-bold shadow-sm" 
-                      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50",
+                    isCooldown && "opacity-70"
                   )}
                 >
                   {/* Left: Icon + Name + Count */}
                   <div className="flex items-center gap-3 overflow-hidden flex-1">
                     <div className={clsx(
                       "w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors",
-                      isActive ? "bg-zinc-900 dark:bg-white text-white dark:text-black" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                      isActive ? "bg-zinc-900 dark:bg-white text-white dark:text-black" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+                      isCooldown && "bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400"
                     )}>
-                        <Hash size={14} />
+                        {isCooldown ? <Clock size={14} /> : <Hash size={14} />}
                     </div>
-                    <div className="flex flex-col overflow-hidden">
+                    <div className="flex flex-col overflow-hidden items-start">
                         <span className="truncate text-[14px] font-medium leading-tight">{room.name}</span>
-                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                            {room.userCount} {room.userCount === 1 ? 'member' : 'members'}
-                        </span>
+                        {isCooldown ? (
+                          <span className="text-[11px] text-red-500 dark:text-red-400 font-medium flex items-center gap-1">
+                             Available in {cooldownText}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                              {room.userCount} {room.userCount === 1 ? 'member' : 'members'}
+                          </span>
+                        )}
                     </div>
                   </div>
 
