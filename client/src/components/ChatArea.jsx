@@ -143,17 +143,17 @@ export default function ChatArea() {
         {/* Share/Copy ID Button */}
         <button
           onClick={copyRoomId}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+          className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
         >
           {copied ? (
             <>
               <Check size={14} className="text-green-500" />
-              <span className="text-green-500">Copied!</span>
+              <span className="text-green-500 hidden sm:inline">Copied!</span>
             </>
           ) : (
             <>
               <Copy size={14} />
-              <span>Share ID</span>
+              <span className="hidden sm:inline">Share ID</span>
             </>
           )}
         </button>
@@ -162,10 +162,10 @@ export default function ChatArea() {
         {user?.isAdmin && (
           <button
             onClick={() => setShowBroadcastModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors ml-2"
+            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors ml-2"
           >
             <Megaphone size={14} />
-            <span>发布通知</span>
+            <span className="hidden sm:inline">发布通知</span>
           </button>
         )}
       </div>
@@ -396,7 +396,7 @@ export default function ChatArea() {
               whileTap={{ scale: 0.95 }}
               type="submit"
               disabled={!input.trim()}
-              className="h-9 px-5 bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-200 text-white dark:text-black text-[15px] font-bold rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="h-9 px-3 sm:px-5 bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-200 text-white dark:text-black text-[15px] font-bold rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
             >
               Post
             </motion.button>
