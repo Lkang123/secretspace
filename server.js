@@ -37,10 +37,30 @@ class DataPersistence {
 
   initTables() {
     this.db.serialize(() => {
+      // Key-Value store for configuration data
       this.db.run("CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)");
       // We use a simple Key-Value store structure within SQLite for this architecture
       // to minimize refactoring while getting DB stability.
-      // Keys: 'rooms', 'userCredentials', 'messageHistory', 'roomBanners', 'kickedUsers'
+      // Keys: 'rooms', 'userCredentials', 'roomBanners', 'kickedUsers'
+      
+      // Messages table for persistent chat history
+      this.db.run(`CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        reply_to_id TEXT,
+        reply_to_sender TEXT,
+        reply_to_text TEXT,
+        sender_avatar_id TEXT,
+        is_admin INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      
+      // Create index for fast room-based queries
+      this.db.run("CREATE INDEX IF NOT EXISTS idx_room_timestamp ON messages(room_id, timestamp DESC)");
     });
   }
 
@@ -69,7 +89,7 @@ class DataPersistence {
                 data.forEach(([k, v]) => userCredentials.set(k, v));
                 break;
               case 'messageHistory':
-                data.forEach(([k, v]) => messageHistory.set(k, v));
+                // Legacy: messageHistory now stored in 'messages' table, skip loading from kv_store
                 break;
               case 'roomBanners':
                 data.forEach(([k, v]) => roomBanners.set(k, v));
@@ -91,10 +111,10 @@ class DataPersistence {
   save() {
     // Serialize Map data to JSON strings and save to SQLite
     // Using transaction for atomicity
+    // Note: messageHistory is now stored in 'messages' table, not here
     const dataToSave = [
       { key: 'rooms', value: JSON.stringify(this.mapToArray(rooms)) },
       { key: 'userCredentials', value: JSON.stringify(this.mapToArray(userCredentials)) },
-      { key: 'messageHistory', value: JSON.stringify(this.mapToArray(messageHistory)) },
       { key: 'roomBanners', value: JSON.stringify(this.mapToArray(roomBanners)) },
       { key: 'kickedUsers', value: JSON.stringify(this.mapToArray(kickedUsers)) }
     ];
@@ -109,6 +129,76 @@ class DataPersistence {
       this.db.run("COMMIT", (err) => {
         if (err) console.error('Error saving data to SQLite:', err);
       });
+    });
+  }
+
+  // Save a single message to database
+  saveMessage(msgData, roomId) {
+    return new Promise((resolve, reject) => {
+      const stmt = this.db.prepare(`
+        INSERT INTO messages 
+        (room_id, sender_id, sender_name, message, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, is_admin)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      stmt.run(
+        roomId,
+        msgData.senderId,
+        msgData.sender,
+        msgData.text,
+        msgData.timestamp,
+        msgData.replyTo?.id || null,
+        msgData.replyTo?.sender || null,
+        msgData.replyTo?.text || null,
+        msgData.senderAvatarId || null,
+        msgData.isAdmin ? 1 : 0,
+        (err) => {
+          if (err) {
+            console.error('Error saving message:', err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
+      
+      stmt.finalize();
+    });
+  }
+
+  // Get message history for a room (most recent first, then reversed)
+  getMessageHistory(roomId, limit = 100) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT * FROM messages 
+         WHERE room_id = ? 
+         ORDER BY timestamp DESC 
+         LIMIT ?`,
+        [roomId, limit],
+        (err, rows) => {
+          if (err) {
+            console.error('Error fetching messages:', err);
+            reject(err);
+          } else {
+            // Convert DB rows to message format and reverse to chronological order
+            const messages = rows.reverse().map(row => ({
+              id: row.id,
+              text: row.message,
+              sender: row.sender_name,
+              senderId: row.sender_id,
+              senderAvatarId: row.sender_avatar_id,
+              isAdmin: row.is_admin === 1,
+              timestamp: row.timestamp,
+              replyTo: row.reply_to_id ? {
+                id: row.reply_to_id,
+                sender: row.reply_to_sender,
+                text: row.reply_to_text
+              } : null
+            }));
+            resolve(messages);
+          }
+        }
+      );
     });
   }
 }
@@ -376,7 +466,7 @@ io.on('connection', (socket) => {
   });
 
   // 3. Join Room
-  socket.on('join_room', (roomId, callback) => {
+  socket.on('join_room', async (roomId, callback) => {
     const user = users.get(socket.id);
     if (!rooms.has(roomId)) {
       return callback && callback({ success: false, error: 'Room not found' });
@@ -454,8 +544,15 @@ io.on('connection', (socket) => {
     user.isStealthInRoom = isAdminStealth;
     users.set(socket.id, user);
 
-    // Get message history for this room
-    const history = messageHistory.get(roomId) || [];
+    // Get message history from database (last 100 messages)
+    let history = [];
+    try {
+      history = await persistence.getMessageHistory(roomId, 100);
+    } catch (err) {
+      console.error('Failed to load message history:', err);
+      // Fallback to memory cache if DB fails
+      history = messageHistory.get(roomId) || [];
+    }
 
     // Only notify and update counts if not admin stealth mode
     if (!isAdminStealth) {
@@ -555,7 +652,7 @@ io.on('connection', (socket) => {
   });
 
   // 5. Send Message
-  socket.on('send_message', ({ message, roomId, replyTo }) => {
+  socket.on('send_message', async ({ message, roomId, replyTo }) => {
     const user = users.get(socket.id);
     // Verify user is actually in the room
     if (user.currentRoom !== roomId) return;
@@ -571,7 +668,15 @@ io.on('connection', (socket) => {
       replyTo: replyTo || null // Add replyTo field
     };
 
-    // Store in history (limit to 100 messages per room)
+    // Save message to database (persistent storage)
+    try {
+      await persistence.saveMessage(msgData, roomId);
+    } catch (err) {
+      console.error('Failed to save message to database:', err);
+      // Continue anyway - message will be broadcast but not persisted
+    }
+
+    // Also keep in memory cache for quick access (last 100 messages)
     if (!messageHistory.has(roomId)) {
       messageHistory.set(roomId, []);
     }
