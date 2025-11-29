@@ -2,7 +2,23 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 
-const socket = io();
+// Socket.io 客户端配置 - 优化连接稳定性
+const socket = io({
+  // 重连配置
+  reconnection: true,           // 启用自动重连
+  reconnectionAttempts: 10,     // 最多重连10次
+  reconnectionDelay: 1000,      // 首次重连延迟1秒
+  reconnectionDelayMax: 5000,   // 最大重连延迟5秒
+  randomizationFactor: 0.5,     // 随机因子，避免所有客户端同时重连
+  
+  // 超时配置
+  timeout: 20000,               // 连接超时20秒
+  
+  // 传输配置
+  transports: ['websocket', 'polling'], // 优先使用 WebSocket
+  upgrade: true,                // 允许从 polling 升级到 websocket
+});
+
 let isInitialized = false; // Prevent duplicate listeners from StrictMode
 
 // Check if there's a saved session (to determine initial restoring state)
@@ -95,7 +111,54 @@ export const useChatStore = create((set, get) => ({
       }
     });
 
-    socket.on('disconnect', () => set({ connected: false }));
+    socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+      set({ connected: false });
+      
+      // 如果是服务器主动断开，需要手动重连
+      if (reason === 'io server disconnect') {
+        socket.connect();
+      }
+    });
+
+    // 重连事件处理
+    socket.on('reconnect', (attemptNumber) => {
+      console.log('Socket reconnected after', attemptNumber, 'attempts');
+      toast.success('连接已恢复', { duration: 2000 });
+      
+      // 重连后自动恢复会话
+      const session = localStorage.getItem('chat_session');
+      if (session) {
+        const { username, password } = JSON.parse(session);
+        get().login(username, password, true).then((result) => {
+          if (result.success) {
+            const lastRoomId = localStorage.getItem('last_room_id');
+            if (lastRoomId) {
+              get().joinRoom(lastRoomId);
+            }
+          }
+        });
+      }
+    });
+
+    socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('Reconnection attempt:', attemptNumber);
+    });
+
+    socket.on('reconnect_error', (error) => {
+      console.error('Reconnection error:', error);
+    });
+
+    socket.on('reconnect_failed', () => {
+      console.error('Failed to reconnect');
+      toast.error('连接失败，请刷新页面重试', { duration: 5000 });
+    });
+
+    // 连接错误处理
+    socket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+      set({ connected: false });
+    });
     
     socket.on('rooms_updated', (newRooms) => {
       set((state) => {

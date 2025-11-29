@@ -8,7 +8,7 @@ import Modal from './Modal';
 import { getAvatarColor, getInitials, getAvatarUrl, PRESET_AVATARS, getPresetAvatarUrl } from '../utils';
 
 export default function Sidebar() {
-  const { rooms, adminRooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar, fetchAdminRooms, openAdminPanel } = useChatStore();
+  const { rooms, adminRooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar, fetchAdminRooms, openAdminPanel, connected } = useChatStore();
   const { theme, toggleTheme } = useThemeStore();
   const [isCreating, setIsCreating] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'join'
@@ -62,9 +62,15 @@ export default function Sidebar() {
               <span className="text-[15px] font-bold text-zinc-900 dark:text-white leading-tight">
                 {user?.username}
               </span>
-              <span className="text-[13px] text-zinc-500 dark:text-zinc-500">
-                {user?.isAdmin ? '@admin' : '@user'}
-              </span>
+              <div className="flex items-center gap-2 text-[13px] text-zinc-500 dark:text-zinc-500">
+                <span>{user?.isAdmin ? '@admin' : '@user'}</span>
+                <span className="flex items-center gap-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
+                  <span className={connected ? 'text-green-600 dark:text-green-400' : 'text-red-500'}>
+                    {connected ? '' : '离线'}
+                  </span>
+                </span>
+              </div>
             </div>
           </div>
           

@@ -6,7 +6,7 @@ import { Hash, ArrowLeft, Copy, Check, Reply, X, Smile, Megaphone, Volume2 } fro
 import { getAvatarColor, getInitials, getAvatarUrl, getPresetAvatarUrl } from '../utils';
 
 export default function ChatArea() {
-  const { currentRoom, rooms, messages, sendMessage, user, leaveRoom, setReplyingTo, replyingTo, userAvatars, adminBroadcast, roomBanner, clearRoomBanner } = useChatStore();
+  const { currentRoom, rooms, messages, sendMessage, user, leaveRoom, setReplyingTo, replyingTo, userAvatars, adminBroadcast, roomBanner, clearRoomBanner, connected } = useChatStore();
   const [input, setInput] = useState('');
   const [copied, setCopied] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -129,8 +129,8 @@ export default function ChatArea() {
             </div>
             <div className="flex items-center gap-2 text-[12px] text-zinc-500 dark:text-zinc-400">
                 <span className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                    Online
+                    <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
+                    {connected ? 'Online' : 'Reconnecting...'}
                 </span>
                 <span>•</span>
                 <span>{activeRoom.userCount} members</span>

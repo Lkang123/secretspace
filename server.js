@@ -15,7 +15,26 @@ const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer);
+
+// Socket.io 服务器配置 - 优化连接稳定性
+const io = new Server(httpServer, {
+  // 心跳检测配置
+  pingTimeout: 30000,     // 30秒无响应视为断开
+  pingInterval: 25000,    // 每25秒发送一次心跳
+  
+  // 连接配置
+  connectTimeout: 45000,  // 连接超时45秒
+  
+  // 传输配置
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  
+  // 允许的来源
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
 // In-memory storage
 const rooms = new Map(); // roomId -> { id, name, ownerId, createdAt }
