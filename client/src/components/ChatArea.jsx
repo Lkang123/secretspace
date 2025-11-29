@@ -140,34 +140,37 @@ export default function ChatArea() {
           </div>
         </div>
         
-        {/* Share/Copy ID Button */}
-        <button
-          onClick={copyRoomId}
-          className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-        >
-          {copied ? (
-            <>
-              <Check size={14} className="text-green-500" />
-              <span className="text-green-500 hidden sm:inline">Copied!</span>
-            </>
-          ) : (
-            <>
-              <Copy size={14} />
-              <span className="hidden sm:inline">Share ID</span>
-            </>
-          )}
-        </button>
-        
-        {/* Admin Broadcast Button */}
-        {user?.isAdmin && (
+        {/* Right side buttons container */}
+        <div className="flex items-center gap-2">
+          {/* Share/Copy ID Button */}
           <button
-            onClick={() => setShowBroadcastModal(true)}
-            className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors ml-2"
+            onClick={copyRoomId}
+            className="flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors shrink-0"
           >
-            <Megaphone size={14} />
-            <span className="hidden sm:inline">发布通知</span>
+            {copied ? (
+              <>
+                <Check size={14} className="text-green-500" />
+                <span className="text-green-500 hidden sm:inline">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={14} />
+                <span className="hidden sm:inline">Share ID</span>
+              </>
+            )}
           </button>
-        )}
+          
+          {/* Admin Broadcast Button */}
+          {user?.isAdmin && (
+            <button
+              onClick={() => setShowBroadcastModal(true)}
+              className="flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full text-[13px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors shrink-0"
+            >
+              <Megaphone size={14} />
+              <span className="hidden sm:inline">发布通知</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Banner Notification */}
@@ -359,28 +362,28 @@ export default function ChatArea() {
         </AnimatePresence>
 
         <div className="p-4">
-          <form onSubmit={handleSend} className="flex items-center gap-3">
+          <form onSubmit={handleSend} className="flex items-center gap-2 sm:gap-3">
             <img 
               src={getPresetAvatarUrl(user?.avatarId, user?.username)} 
               alt={user?.username}
               className="w-10 h-10 rounded-full shrink-0 bg-zinc-200 dark:bg-zinc-700"
             />
-            <div className="flex-1 flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 min-w-0">
               <input
                 ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="What's happening?"
-                className="flex-1 h-12 px-4 bg-transparent text-[17px] text-zinc-900 dark:text-white placeholder-zinc-500 focus:outline-none"
+                className="flex-1 h-12 px-3 sm:px-4 bg-transparent text-[15px] sm:text-[17px] text-zinc-900 dark:text-white placeholder-zinc-500 focus:outline-none min-w-0"
               />
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEmojiPicker((v) => !v)}
                   className="h-9 w-9 flex items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                 >
-                  <Smile size={20} />
+                  <Smile size={18} />
                 </button>
                 {showEmojiPicker && (
                   <div className="absolute bottom-11 right-0 z-50">
@@ -396,7 +399,7 @@ export default function ChatArea() {
               whileTap={{ scale: 0.95 }}
               type="submit"
               disabled={!input.trim()}
-              className="h-9 px-3 sm:px-5 bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-200 text-white dark:text-black text-[15px] font-bold rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+              className="h-9 px-4 sm:px-5 bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-200 text-white dark:text-black text-[14px] sm:text-[15px] font-bold rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 whitespace-nowrap"
             >
               Post
             </motion.button>
