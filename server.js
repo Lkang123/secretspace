@@ -26,7 +26,7 @@ const storage = multer.memoryStorage(); // 使用内存存储，便于 sharp 处
 const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB 限制
+    fileSize: 20 * 1024 * 1024, // 20MB 限制
   },
   fileFilter: (req, file, cb) => {
     // 只允许图片
@@ -619,7 +619,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: '文件太大，最大支持10MB' });
+      return res.status(400).json({ error: '文件太大，最大支持20MB' });
     }
     return res.status(400).json({ error: err.message });
   }

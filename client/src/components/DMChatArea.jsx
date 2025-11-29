@@ -116,8 +116,8 @@ export default function DMChatArea() {
       return;
     }
     
-    if (file.size > 10 * 1024 * 1024) {
-      alert('图片最大支持10MB');
+    if (file.size > 20 * 1024 * 1024) {
+      alert('图片最大支持20MB');
       return;
     }
     
