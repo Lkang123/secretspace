@@ -595,13 +595,13 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
     const filename = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.webp`;
     const filepath = path.join(UPLOADS_DIR, filename);
 
-    // 使用 sharp 压缩并转换为 webp 格式（现代主流方案）
+    // 使用 sharp 压缩并转换为 webp 格式（控制体积）
     await sharp(req.file.buffer)
-      .resize(1920, 1920, { // 最大尺寸 1920x1920，保持比例
+      .resize(1600, 1600, { // 最大尺寸 1600x1600，保持比例
         fit: 'inside',
         withoutEnlargement: true
       })
-      .webp({ quality: 85 }) // webp 格式，质量 85%
+      .webp({ quality: 80 }) // webp 格式，质量 80%
       .toFile(filepath);
 
     // 返回可访问的 URL
