@@ -41,6 +41,17 @@ export default function DMChatArea() {
   }, [dmMessages, currentDM, clearDMUnread]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const handleViewportChange = () => {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }, 50);
+    };
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    return () => window.visualViewport.removeEventListener('resize', handleViewportChange);
+  }, []);
+
+  useEffect(() => {
     if (replyingTo) {
       inputRef.current?.focus();
     }
@@ -68,6 +79,12 @@ export default function DMChatArea() {
     });
 
     setShowEmojiPicker(false);
+  };
+
+  const handleInputFocus = () => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }, 50);
   };
 
   const handleSend = async (e) => {
@@ -404,6 +421,7 @@ export default function DMChatArea() {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onFocus={handleInputFocus}
                 onPaste={handlePaste}
                 placeholder="Type a message..."
                 className="flex-1 h-12 px-3 sm:px-4 bg-transparent text-[15px] sm:text-[17px] text-zinc-900 dark:text-white placeholder-zinc-500 focus:outline-none min-w-0"

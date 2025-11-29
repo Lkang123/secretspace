@@ -47,6 +47,17 @@ export default function ChatArea() {
     return () => clearTimeout(timer);
   }, [messages]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const handleViewportChange = () => {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }, 50);
+    };
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    return () => window.visualViewport.removeEventListener('resize', handleViewportChange);
+  }, []);
+
   const handleEmojiClick = (emoji) => {
     const emojiChar = typeof emoji === 'string' ? emoji : emoji?.emoji;
     if (!emojiChar) return;
@@ -70,6 +81,12 @@ export default function ChatArea() {
     });
 
     setShowEmojiPicker(false);
+  };
+
+  const handleInputFocus = () => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }, 50);
   };
 
   // Focus input when replying
@@ -548,6 +565,7 @@ export default function ChatArea() {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onFocus={handleInputFocus}
                 onPaste={handlePaste}
                 placeholder="What's happening?"
                 className="flex-1 h-12 px-3 sm:px-4 bg-transparent text-[15px] sm:text-[17px] text-zinc-900 dark:text-white placeholder-zinc-500 focus:outline-none min-w-0"
