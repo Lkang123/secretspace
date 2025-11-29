@@ -14,6 +14,7 @@ function App() {
     initSocket, 
     connected, 
     currentRoom,
+    isRestoring,
     showWelcomeModal, 
     closeWelcomeModal, 
     showAdminWelcomeModal,
@@ -221,7 +222,7 @@ function App() {
   );
 
   // Show loading state while connecting or restoring session
-  if (!connected) {
+  if (!connected || isRestoring) {
     return (
       <>
         {forceLogoutModal}
@@ -229,7 +230,7 @@ function App() {
           <div className="flex flex-col items-center gap-3">
             <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Connecting...
+              {!connected ? 'Connecting...' : 'Restoring session...'}
             </p>
           </div>
         </div>
