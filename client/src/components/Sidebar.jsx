@@ -2,13 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '../store';
 import { useThemeStore } from '../themeStore';
-import { Plus, Hash, Trash2, LogOut, Sun, Moon, X, Shield, Clock } from 'lucide-react';
+import { Plus, Hash, Trash2, LogOut, Sun, Moon, X, Shield, Clock, MessageCircle, Search, Users, Crown, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import Modal from './Modal';
 import { getAvatarColor, getInitials, getAvatarUrl, PRESET_AVATARS, getPresetAvatarUrl } from '../utils';
 
 export default function Sidebar() {
-  const { rooms, adminRooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar, fetchAdminRooms, openAdminPanel, connected } = useChatStore();
+  const { 
+    rooms, adminRooms, currentRoom, user, createRoom, joinRoom, dismissRoom, logout, updateAvatar, 
+    fetchAdminRooms, openAdminPanel, connected,
+    // DM 相关
+    dmList, dmUnreadTotal, fetchDMList, startDM, enterDM, searchUsers,
+    currentDM, showDMPanel
+  } = useChatStore();
   const { theme, toggleTheme } = useThemeStore();
   const [isCreating, setIsCreating] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'join'
@@ -16,11 +22,50 @@ export default function Sidebar() {
   const [deleteModal, setDeleteModal] = useState({ open: false, roomId: null, roomName: '' });
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [now, setNow] = useState(Date.now());
+  
+  // DM 相关状态
+  const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'dms'
+  const [showUserSearch, setShowUserSearch] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // 获取私聊列表
+  useEffect(() => {
+    if (user) {
+      fetchDMList();
+    }
+  }, [user]);
+
+  // 用户搜索防抖
+  useEffect(() => {
+    if (!userSearchQuery.trim()) {
+      setUserSearchResults([]);
+      return;
+    }
+    
+    setIsSearching(true);
+    const timer = setTimeout(async () => {
+      const results = await searchUsers(userSearchQuery);
+      setUserSearchResults(results);
+      setIsSearching(false);
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [userSearchQuery]);
+
+  const handleStartDM = async (targetUser) => {
+    await startDM(targetUser.id, targetUser.username);
+    setShowUserSearch(false);
+    setUserSearchQuery('');
+    setUserSearchResults([]);
+    fetchDMList();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -42,28 +87,60 @@ export default function Sidebar() {
     <div className="w-full md:w-72 h-dvh flex flex-col bg-white/90 dark:bg-zinc-950/95 backdrop-blur-xl border-r border-zinc-200/40 dark:border-zinc-700/40 transition-colors duration-300 shadow-lg">
       {/* Header / User Info */}
       <div className="p-4 backdrop-blur-md bg-white/50 dark:bg-zinc-900/50">
-        <div className="flex items-center justify-between px-2 mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowAvatarPicker(true)}
               className="relative group"
               title="Change avatar"
             >
+              {/* Admin glow effect */}
+              {user?.isAdmin && (
+                <div className="absolute -inset-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 rounded-full opacity-75 blur-sm animate-pulse" />
+              )}
               <img 
                 src={getPresetAvatarUrl(user?.avatarId, user?.username)} 
                 alt={user?.username}
-                className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700 cursor-pointer ring-2 ring-transparent group-hover:ring-zinc-400 dark:group-hover:ring-zinc-500 transition-all"
+                className={clsx(
+                  "w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700 cursor-pointer transition-all relative",
+                  user?.isAdmin 
+                    ? "ring-2 ring-amber-400 group-hover:ring-amber-300" 
+                    : "ring-2 ring-transparent group-hover:ring-zinc-400 dark:group-hover:ring-zinc-500"
+                )}
               />
               <div className="absolute inset-0 rounded-full bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <span className="text-white text-[10px] font-medium">Edit</span>
               </div>
+              {/* Admin crown badge */}
+              {user?.isAdmin && (
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-amber-400 to-yellow-500 rounded-full flex items-center justify-center shadow-lg">
+                  <Crown size={10} className="text-white" />
+                </div>
+              )}
             </button>
             <div className="flex flex-col">
-              <span className="text-[15px] font-bold text-zinc-900 dark:text-white leading-tight">
-                {user?.username}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={clsx(
+                  "text-[15px] font-bold leading-tight",
+                  user?.isAdmin 
+                    ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 bg-clip-text text-transparent" 
+                    : "text-zinc-900 dark:text-white"
+                )}>
+                  {user?.username}
+                </span>
+                {user?.isAdmin && (
+                  <Sparkles size={14} className="text-amber-400 animate-pulse" />
+                )}
+              </div>
               <div className="flex items-center gap-2 text-[13px] text-zinc-500 dark:text-zinc-500">
-                <span>{user?.isAdmin ? '@admin' : '@user'}</span>
+                {user?.isAdmin ? (
+                  <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
+                    <Crown size={10} />
+                    Chairman
+                  </span>
+                ) : (
+                  <span>@user</span>
+                )}
                 <span className="flex items-center gap-1">
                   <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
                   <span className={connected ? 'text-green-600 dark:text-green-400' : 'text-red-500'}>
@@ -82,6 +159,19 @@ export default function Sidebar() {
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
+
+        {/* Admin Welcome Banner */}
+        {user?.isAdmin && (
+          <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20 border border-amber-200/50 dark:border-amber-700/30"
+          >
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <Crown size={16} className="shrink-0" />
+              <p className="text-[13px] font-medium">
+                欢迎回来，尊敬的董事长！
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-2 mb-2">
@@ -134,12 +224,51 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Room List */}
+      {/* Tabs: Rooms / DMs */}
+      <div className="flex gap-1 px-4 mb-2">
+        <button
+          onClick={() => setActiveTab('rooms')}
+          className={clsx(
+            "flex-1 h-9 flex items-center justify-center gap-2 rounded-full text-[13px] font-medium transition-all",
+            activeTab === 'rooms'
+              ? "bg-zinc-900 dark:bg-white text-white dark:text-black"
+              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          )}
+        >
+          <Hash size={14} />
+          <span>Rooms</span>
+          {rooms.reduce((sum, r) => sum + (r.unreadCount || 0), 0) > 0 && (
+            <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-red-500 text-white">
+              {rooms.reduce((sum, r) => sum + (r.unreadCount || 0), 0)}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => { setActiveTab('dms'); fetchDMList(); }}
+          className={clsx(
+            "flex-1 h-9 flex items-center justify-center gap-2 rounded-full text-[13px] font-medium transition-all",
+            activeTab === 'dms'
+              ? "bg-zinc-900 dark:bg-white text-white dark:text-black"
+              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          )}
+        >
+          <MessageCircle size={14} />
+          <span>DMs</span>
+          {dmUnreadTotal > 0 && (
+            <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-red-500 text-white">
+              {dmUnreadTotal}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Content based on active tab */}
       <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
-        <div className="px-3 py-2 text-[13px] font-bold text-zinc-500 dark:text-zinc-500">
-          Rooms
-        </div>
-        <AnimatePresence initial={false}>
+        {activeTab === 'rooms' ? (
+          <>
+            <div className="px-3 py-2 text-[13px] font-bold text-zinc-500 dark:text-zinc-500">
+              Rooms
+            </div>
           {rooms.map((room) => {
             const isActive = currentRoom?.id === room.id;
             const canDelete = user?.isAdmin || room.ownerId === user?.id;
@@ -151,11 +280,8 @@ export default function Sidebar() {
               : null;
 
             return (
-              <motion.div
+              <div
                 key={room.id}
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
                 className="group relative flex items-center"
               >
                 <button
@@ -226,11 +352,165 @@ export default function Sidebar() {
                     )}
                   </div>
                 </button>
-              </motion.div>
+              </div>
             );
           })}
-        </AnimatePresence>
+          </>
+        ) : (
+          <>
+            {/* DM Header with New DM button */}
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="text-[13px] font-bold text-zinc-500 dark:text-zinc-500">
+                Messages
+              </span>
+              <button
+                onClick={() => setShowUserSearch(true)}
+                className="p-1.5 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                title="New Message"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+            
+            {/* DM List */}
+            {dmList.length === 0 ? (
+              <div className="text-center py-8 text-zinc-400 text-[13px]">
+                <MessageCircle size={32} className="mx-auto mb-2 opacity-50" />
+                <p>No messages yet</p>
+                <button
+                  onClick={() => setShowUserSearch(true)}
+                  className="mt-2 text-blue-500 hover:underline"
+                >
+                  Start a conversation
+                </button>
+              </div>
+            ) : (
+              dmList.map((conv) => {
+                const isActive = currentDM?.id === conv.id && showDMPanel;
+                return (
+                  <div key={conv.id}>
+                    <button
+                      onClick={() => enterDM(conv)}
+                      className={clsx(
+                        "w-full h-14 flex items-center gap-3 px-3 rounded-xl transition-colors",
+                        isActive 
+                          ? "bg-zinc-100 dark:bg-zinc-800 shadow-sm" 
+                          : "hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                      )}
+                    >
+                      <img
+                        src={getPresetAvatarUrl(null, conv.otherUser?.name)}
+                        alt={conv.otherUser?.name}
+                        className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700"
+                      />
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="flex items-center justify-between">
+                          <span className={clsx(
+                            "text-[14px] font-medium truncate",
+                            isActive ? "text-zinc-900 dark:text-white font-bold" : "text-zinc-900 dark:text-white"
+                          )}>
+                            {conv.otherUser?.name}
+                          </span>
+                          {conv.unreadCount > 0 && (
+                            <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-red-500 text-white">
+                              {conv.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                        <p className={clsx(
+                          "text-[12px] truncate",
+                          isActive ? "text-zinc-600 dark:text-zinc-300" : "text-zinc-500"
+                        )}>
+                          {conv.lastMessage || 'No messages yet'}
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
       </div>
+
+      {/* User Search Modal for starting new DM */}
+      <AnimatePresence>
+        {showUserSearch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => { setShowUserSearch(false); setUserSearchQuery(''); setUserSearchResults([]); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl p-5 w-full max-w-[360px] shadow-2xl max-h-[70vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">New Message</h3>
+                <button
+                  onClick={() => { setShowUserSearch(false); setUserSearchQuery(''); setUserSearchResults([]); }}
+                  className="p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  <X size={20} className="text-zinc-500" />
+                </button>
+              </div>
+              
+              {/* Search Input */}
+              <div className="relative mb-4">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <input
+                  autoFocus
+                  type="text"
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  placeholder="Search users..."
+                  className="w-full h-10 pl-9 pr-4 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[14px] text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              
+              {/* Search Results */}
+              <div className="flex-1 overflow-y-auto space-y-1">
+                {isSearching ? (
+                  <div className="text-center py-4 text-zinc-400 text-[13px]">
+                    Searching...
+                  </div>
+                ) : userSearchResults.length === 0 && userSearchQuery ? (
+                  <div className="text-center py-4 text-zinc-400 text-[13px]">
+                    No users found
+                  </div>
+                ) : (
+                  userSearchResults.map((u) => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleStartDM(u)}
+                      className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      <img
+                        src={getPresetAvatarUrl(u.avatarId, u.username)}
+                        alt={u.username}
+                        className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700"
+                      />
+                      <div className="flex flex-col items-start">
+                        <span className="text-[14px] font-medium text-zinc-900 dark:text-white">
+                          {u.username}
+                        </span>
+                        {u.isAdmin && (
+                          <span className="text-[11px] text-amber-600 dark:text-amber-400">Admin</span>
+                        )}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Bottom User Actions */}
       <div className="p-4 border-t border-zinc-200/40 dark:border-zinc-700/40 backdrop-blur-md bg-white/50 dark:bg-zinc-900/50">

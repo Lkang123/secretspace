@@ -5,6 +5,7 @@ import { useThemeStore } from './themeStore';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
+import DMChatArea from './components/DMChatArea';
 import { AlertTriangle, CheckCircle, X, Shield, Trash2, Users, Edit2, Key, LogIn, UserX, Crown } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -36,7 +37,10 @@ function App() {
     kickedFromRoom,
     closeKickedModal,
     kickCooldownInfo,
-    closeKickCooldownModal
+    closeKickCooldownModal,
+    // DM 相关
+    showDMPanel,
+    currentDM
   } = useChatStore();
   const { theme } = useThemeStore();
   
@@ -258,11 +262,11 @@ function App() {
         }}
       />
       <div className="h-dvh flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300 overflow-hidden">
-        <div className={`${currentRoom ? 'hidden md:block' : 'block'} w-full md:w-auto h-full z-20`}>
+        <div className={`${(currentRoom || showDMPanel) ? 'hidden md:block' : 'block'} w-full md:w-auto h-full z-20`}>
            <Sidebar />
         </div>
-        <div className={`${!currentRoom ? 'hidden md:flex' : 'flex'} flex-1 h-full w-full relative z-10`}>
-           <ChatArea />
+        <div className={`${!(currentRoom || showDMPanel) ? 'hidden md:flex' : 'flex'} flex-1 h-full w-full relative z-10`}>
+           {showDMPanel ? <DMChatArea /> : <ChatArea />}
         </div>
       </div>
 

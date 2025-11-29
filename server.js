@@ -6,12 +6,37 @@ import fs from 'fs';
 import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import sharp from 'sharp';
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
+// 确保上传目录存在
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+// Multer 配置 - 图片上传
+const storage = multer.memoryStorage(); // 使用内存存储，便于 sharp 处理
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB 限制
+  },
+  fileFilter: (req, file, cb) => {
+    // 只允许图片
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只支持图片文件'), false);
+    }
+  }
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,6 +68,7 @@ const messageHistory = new Map(); // roomId -> [messages] (limited to last 100)
 const userCredentials = new Map(); // username -> { password, persistentId, isAdmin, joinedRooms: [] }
 const roomBanners = new Map(); // roomId -> { message, createdAt, createdBy }
 const kickedUsers = new Map(); // "roomId:username" -> kickedAt timestamp (5 min cooldown)
+const dmConversations = new Map(); // conversationId -> { id, participants: [userId1, userId2], createdAt }
 
 // --- Data Persistence Layer (SQLite) ---
 class DataPersistence {
@@ -80,6 +106,43 @@ class DataPersistence {
       
       // Create index for fast room-based queries
       this.db.run("CREATE INDEX IF NOT EXISTS idx_room_timestamp ON messages(room_id, timestamp DESC)");
+      
+      // DM conversations table
+      this.db.run(`CREATE TABLE IF NOT EXISTS dm_conversations (
+        id TEXT PRIMARY KEY,
+        user1_id TEXT NOT NULL,
+        user2_id TEXT NOT NULL,
+        user1_name TEXT NOT NULL,
+        user2_name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_message_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      
+      // DM messages table
+      this.db.run(`CREATE TABLE IF NOT EXISTS dm_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        message TEXT,
+        image_url TEXT,
+        timestamp TEXT NOT NULL,
+        reply_to_id TEXT,
+        reply_to_sender TEXT,
+        reply_to_text TEXT,
+        sender_avatar_id TEXT,
+        is_read INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (conversation_id) REFERENCES dm_conversations(id)
+      )`);
+      
+      // Create index for DM queries
+      this.db.run("CREATE INDEX IF NOT EXISTS idx_dm_conversation ON dm_messages(conversation_id, timestamp DESC)");
+      
+      // Add image_url column to messages table if not exists (for room messages)
+      this.db.run("ALTER TABLE messages ADD COLUMN image_url TEXT", (err) => {
+        // Ignore error if column already exists
+      });
     });
   }
 
@@ -156,21 +219,22 @@ class DataPersistence {
     return new Promise((resolve, reject) => {
       const stmt = this.db.prepare(`
         INSERT INTO messages 
-        (room_id, sender_id, sender_name, message, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, is_admin)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (room_id, sender_id, sender_name, message, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, is_admin, image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       stmt.run(
         roomId,
         msgData.senderId,
         msgData.sender,
-        msgData.text,
+        msgData.text || '',
         msgData.timestamp,
         msgData.replyTo?.id || null,
         msgData.replyTo?.sender || null,
         msgData.replyTo?.text || null,
         msgData.senderAvatarId || null,
         msgData.isAdmin ? 1 : 0,
+        msgData.imageUrl || null,
         (err) => {
           if (err) {
             console.error('Error saving message:', err);
@@ -208,6 +272,7 @@ class DataPersistence {
               senderAvatarId: row.sender_avatar_id,
               isAdmin: row.is_admin === 1,
               timestamp: row.timestamp,
+              imageUrl: row.image_url || null,
               replyTo: row.reply_to_id ? {
                 id: row.reply_to_id,
                 sender: row.reply_to_sender,
@@ -218,6 +283,199 @@ class DataPersistence {
           }
         }
       );
+    });
+  }
+
+  // ======= DM 相关数据库方法 =======
+  
+  // 创建或获取私聊会话
+  getOrCreateDMConversation(user1Id, user2Id, user1Name, user2Name) {
+    return new Promise((resolve, reject) => {
+      // 先查找是否已存在会话
+      this.db.get(
+        `SELECT * FROM dm_conversations 
+         WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)`,
+        [user1Id, user2Id, user2Id, user1Id],
+        (err, row) => {
+          if (err) return reject(err);
+          
+          if (row) {
+            // 已存在会话
+            resolve({
+              id: row.id,
+              participants: [
+                { id: row.user1_id, name: row.user1_name },
+                { id: row.user2_id, name: row.user2_name }
+              ],
+              createdAt: row.created_at,
+              lastMessageAt: row.last_message_at
+            });
+          } else {
+            // 创建新会话
+            const convId = `dm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            this.db.run(
+              `INSERT INTO dm_conversations (id, user1_id, user2_id, user1_name, user2_name) VALUES (?, ?, ?, ?, ?)`,
+              [convId, user1Id, user2Id, user1Name, user2Name],
+              (err) => {
+                if (err) return reject(err);
+                resolve({
+                  id: convId,
+                  participants: [
+                    { id: user1Id, name: user1Name },
+                    { id: user2Id, name: user2Name }
+                  ],
+                  createdAt: new Date().toISOString(),
+                  lastMessageAt: new Date().toISOString()
+                });
+              }
+            );
+          }
+        }
+      );
+    });
+  }
+
+  // 获取用户的所有私聊会话
+  getUserDMConversations(userId) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT c.*, 
+          (SELECT COUNT(*) FROM dm_messages m WHERE m.conversation_id = c.id AND m.sender_id != ? AND m.is_read = 0) as unread_count,
+          (SELECT message FROM dm_messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1) as last_message,
+          (SELECT image_url FROM dm_messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1) as last_image
+         FROM dm_conversations c
+         WHERE c.user1_id = ? OR c.user2_id = ?
+         ORDER BY c.last_message_at DESC`,
+        [userId, userId, userId],
+        (err, rows) => {
+          if (err) return reject(err);
+          
+          const conversations = rows.map(row => {
+            // 确定对方是谁
+            const isUser1 = row.user1_id === userId;
+            const otherUserId = isUser1 ? row.user2_id : row.user1_id;
+            const otherUserName = isUser1 ? row.user2_name : row.user1_name;
+            
+            return {
+              id: row.id,
+              otherUser: { id: otherUserId, name: otherUserName },
+              lastMessage: row.last_message || (row.last_image ? '[图片]' : ''),
+              lastMessageAt: row.last_message_at,
+              unreadCount: row.unread_count || 0
+            };
+          });
+          
+          resolve(conversations);
+        }
+      );
+    });
+  }
+
+  // 保存私聊消息
+  saveDMMessage(msgData, conversationId) {
+    return new Promise((resolve, reject) => {
+      const stmt = this.db.prepare(`
+        INSERT INTO dm_messages 
+        (conversation_id, sender_id, sender_name, message, image_url, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      stmt.run(
+        conversationId,
+        msgData.senderId,
+        msgData.sender,
+        msgData.text || '',
+        msgData.imageUrl || null,
+        msgData.timestamp,
+        msgData.replyTo?.id || null,
+        msgData.replyTo?.sender || null,
+        msgData.replyTo?.text || null,
+        msgData.senderAvatarId || null,
+        function(err) {
+          if (err) {
+            console.error('Error saving DM message:', err);
+            reject(err);
+          } else {
+            resolve(this.lastID);
+          }
+        }
+      );
+      
+      stmt.finalize();
+      
+      // 更新会话的最后消息时间
+      this.db.run(
+        `UPDATE dm_conversations SET last_message_at = ? WHERE id = ?`,
+        [msgData.timestamp, conversationId]
+      );
+    });
+  }
+
+  // 获取私聊消息历史
+  getDMHistory(conversationId, limit = 100) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        `SELECT * FROM dm_messages 
+         WHERE conversation_id = ? 
+         ORDER BY timestamp DESC 
+         LIMIT ?`,
+        [conversationId, limit],
+        (err, rows) => {
+          if (err) return reject(err);
+          
+          const messages = rows.reverse().map(row => ({
+            id: row.id,
+            text: row.message,
+            imageUrl: row.image_url || null,
+            sender: row.sender_name,
+            senderId: row.sender_id,
+            senderAvatarId: row.sender_avatar_id,
+            timestamp: row.timestamp,
+            isRead: row.is_read === 1,
+            replyTo: row.reply_to_id ? {
+              id: row.reply_to_id,
+              sender: row.reply_to_sender,
+              text: row.reply_to_text
+            } : null
+          }));
+          
+          resolve(messages);
+        }
+      );
+    });
+  }
+
+  // 标记消息已读
+  markDMMessagesAsRead(conversationId, userId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `UPDATE dm_messages SET is_read = 1 WHERE conversation_id = ? AND sender_id != ?`,
+        [conversationId, userId],
+        (err) => {
+          if (err) return reject(err);
+          resolve();
+        }
+      );
+    });
+  }
+
+  // 搜索用户（用于开始私聊）
+  searchUsers(query, excludeUserId) {
+    return new Promise((resolve) => {
+      const results = [];
+      for (const [username, cred] of userCredentials.entries()) {
+        if (cred.persistentId !== excludeUserId && 
+            username.toLowerCase().includes(query.toLowerCase())) {
+          results.push({
+            id: cred.persistentId,
+            username: cred.isAdmin ? '超级董事长' : username,
+            realUsername: username,
+            isAdmin: cred.isAdmin,
+            avatarId: cred.avatarId
+          });
+        }
+      }
+      resolve(results.slice(0, 20)); // 最多返回20个结果
     });
   }
 }
@@ -323,6 +581,54 @@ const broadcastAdminRoomUpdate = (roomId) => {
 // Serve static files from client/dist
 app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
+// Serve uploaded files
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// 图片上传 API
+app.post('/api/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '没有上传文件' });
+    }
+
+    // 生成唯一文件名
+    const filename = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.webp`;
+    const filepath = path.join(UPLOADS_DIR, filename);
+
+    // 使用 sharp 压缩并转换为 webp 格式（现代主流方案）
+    await sharp(req.file.buffer)
+      .resize(1920, 1920, { // 最大尺寸 1920x1920，保持比例
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .webp({ quality: 85 }) // webp 格式，质量 85%
+      .toFile(filepath);
+
+    // 返回可访问的 URL
+    const imageUrl = `/uploads/${filename}`;
+    res.json({ success: true, imageUrl });
+    
+    console.log(`Image uploaded: ${filename}`);
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: '上传失败' });
+  }
+});
+
+// 处理上传错误
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: '文件太大，最大支持10MB' });
+    }
+    return res.status(400).json({ error: err.message });
+  }
+  if (err.message === '只支持图片文件') {
+    return res.status(400).json({ error: err.message });
+  }
+  next(err);
+});
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -392,8 +698,8 @@ io.on('connection', (socket) => {
     const userCred = userCredentials.get(username);
     const avatarId = userCred?.avatarId ?? null;
 
-    // Display name: show "大内总管" for admin instead of real username
-    const displayName = isAdmin ? '大内总管' : username;
+    // Display name: show "超级董事长" for admin instead of real username
+    const displayName = isAdmin ? '超级董事长' : username;
 
     // Store session for this socket
     users.set(socket.id, {
@@ -670,15 +976,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Send Message
-  socket.on('send_message', async ({ message, roomId, replyTo }) => {
+  // 5. Send Message (支持文本和图片)
+  socket.on('send_message', async ({ message, roomId, replyTo, imageUrl }) => {
     const user = users.get(socket.id);
     // Verify user is actually in the room
     if (user.currentRoom !== roomId) return;
 
     const msgData = {
       id: Date.now(),
-      text: message,
+      text: message || '',
+      imageUrl: imageUrl || null, // 图片URL
       sender: user.username,
       senderId: user.persistentId,
       senderAvatarId: user.avatarId ?? null, // Include avatar ID
@@ -717,7 +1024,7 @@ io.on('connection', (socket) => {
         if (cred && cred.joinedRooms && cred.joinedRooms.includes(roomId)) {
             io.to(socketId).emit('room_notification', {
                 roomId,
-                lastMessage: message,
+                lastMessage: message || (imageUrl ? '[图片]' : ''),
                 timestamp: msgData.timestamp
             });
         }
@@ -751,7 +1058,7 @@ io.on('connection', (socket) => {
     
     // Also send as system message for chat history
     io.to(roomId).emit('system_message', {
-      text: `📢 大内总管发布了新通知：${message}`,
+      text: `📢 超级董事长发布了新通知：${message}`,
       isAdminBroadcast: true
     });
     
@@ -867,9 +1174,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 7. Get Rooms
+  // 7. Get Rooms - returns user-specific rooms, or all rooms for admin
   socket.on('get_rooms', (callback) => {
-    if (callback) callback(getRoomList());
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback([]);
+    }
+    // Admin gets all rooms (for admin panel), normal users get only their joined rooms
+    if (user.isAdmin) {
+      if (callback) callback(getRoomList());
+    } else {
+      if (callback) callback(getUserRooms(user.persistentId));
+    }
   });
 
   // 7. Admin: Get All Users
@@ -938,7 +1254,7 @@ io.on('connection', (socket) => {
         for (const [sid, u] of users.entries()) {
             if (u.realUsername === currentUsername) {
                 u.realUsername = newUsername;
-                u.username = cred.isAdmin ? '大内总管' : newUsername; // Update display name if not admin
+                u.username = cred.isAdmin ? '超级董事长' : newUsername; // Update display name if not admin
                 users.set(sid, u);
                 
                 // Notify user? Or just let them be
@@ -1185,6 +1501,173 @@ io.on('connection', (socket) => {
 
     callback({ success: true });
     console.log(`Admin deleted user: ${username}`);
+  });
+
+  // ======= 私聊 DM 相关事件 =======
+  
+  // 12. 搜索用户（用于开始私聊）
+  socket.on('search_users', async (query, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      const results = await persistence.searchUsers(query, user.persistentId);
+      callback({ success: true, users: results });
+    } catch (err) {
+      console.error('Search users error:', err);
+      callback({ success: false, error: 'Search failed' });
+    }
+  });
+
+  // 13. 开始/获取私聊会话
+  socket.on('start_dm', async ({ targetUserId, targetUsername }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      const conversation = await persistence.getOrCreateDMConversation(
+        user.persistentId,
+        targetUserId,
+        user.username,
+        targetUsername
+      );
+      
+      // 加入私聊房间（用于实时消息推送）
+      socket.join(`dm:${conversation.id}`);
+      
+      // 查找 targetUserId 对应的在线 socket，让他也加入房间，并通知刷新列表
+      for (const [sid, u] of users.entries()) {
+        if (u.persistentId === targetUserId) {
+          const targetSocket = io.sockets.sockets.get(sid);
+          if (targetSocket) {
+            targetSocket.join(`dm:${conversation.id}`);
+            targetSocket.emit('refresh_dm_list');
+          }
+        }
+      }
+      
+      // 获取消息历史
+      const history = await persistence.getDMHistory(conversation.id);
+      
+      // 标记消息已读
+      await persistence.markDMMessagesAsRead(conversation.id, user.persistentId);
+      
+      callback({ 
+        success: true, 
+        conversation: {
+          ...conversation,
+          otherUser: { id: targetUserId, name: targetUsername }
+        },
+        history 
+      });
+    } catch (err) {
+      console.error('Start DM error:', err);
+      callback({ success: false, error: 'Failed to start DM' });
+    }
+  });
+
+  // 14. 获取私聊列表
+  socket.on('get_dm_list', async (callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      const conversations = await persistence.getUserDMConversations(user.persistentId);
+      
+      // 为每个会话加入房间（用于接收实时消息）
+      conversations.forEach(conv => {
+        socket.join(`dm:${conv.id}`);
+      });
+      
+      callback({ success: true, conversations });
+    } catch (err) {
+      console.error('Get DM list error:', err);
+      callback({ success: false, error: 'Failed to get DM list' });
+    }
+  });
+
+  // 15. 发送私聊消息
+  socket.on('send_dm', async ({ conversationId, message, imageUrl, replyTo }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      const msgData = {
+        text: message || '',
+        imageUrl: imageUrl || null,
+        sender: user.username,
+        senderId: user.persistentId,
+        senderAvatarId: user.avatarId ?? null,
+        timestamp: new Date().toISOString(),
+        replyTo: replyTo || null
+      };
+      
+      // 保存到数据库
+      const msgId = await persistence.saveDMMessage(msgData, conversationId);
+      
+      // 广播给会话中的所有参与者
+      const fullMsg = { ...msgData, id: msgId };
+      io.to(`dm:${conversationId}`).emit('receive_dm', {
+        conversationId,
+        message: fullMsg
+      });
+      
+      // 通知对方有新消息（如果不在此会话中）
+      // 这里简化处理，让前端通过 dm_notification 更新未读数
+      io.to(`dm:${conversationId}`).emit('dm_notification', {
+        conversationId,
+        lastMessage: message || '[图片]',
+        timestamp: msgData.timestamp
+      });
+      
+      if (callback) callback({ success: true, message: fullMsg });
+    } catch (err) {
+      console.error('Send DM error:', err);
+      if (callback) callback({ success: false, error: 'Failed to send message' });
+    }
+  });
+
+  // 16. 进入私聊会话（加入房间 + 标记已读）
+  socket.on('enter_dm', async (conversationId, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      socket.join(`dm:${conversationId}`);
+      await persistence.markDMMessagesAsRead(conversationId, user.persistentId);
+      
+      const history = await persistence.getDMHistory(conversationId);
+      callback({ success: true, history });
+    } catch (err) {
+      console.error('Enter DM error:', err);
+      callback({ success: false, error: 'Failed to enter DM' });
+    }
+  });
+
+  // 17. 标记私聊已读
+  socket.on('mark_dm_read', async (conversationId, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    try {
+      await persistence.markDMMessagesAsRead(conversationId, user.persistentId);
+      if (callback) callback({ success: true });
+    } catch (err) {
+      console.error('Mark DM read error:', err);
+      if (callback) callback({ success: false, error: 'Failed to mark as read' });
+    }
   });
   
   // Cleanup on disconnect

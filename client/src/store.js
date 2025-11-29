@@ -45,6 +45,17 @@ export const useChatStore = create((set, get) => ({
   kickedFromRoom: null, // { roomName, reason } or null - for when kicked from room
   kickCooldownInfo: null, // { roomName, error } or null - for when trying to join but still in cooldown
   
+  // DM 私聊相关状态
+  dmList: [], // 私聊会话列表
+  currentDM: null, // 当前私聊会话 { id, otherUser }
+  dmMessages: [], // 当前私聊消息
+  dmUnreadTotal: 0, // 私聊未读总数
+  showDMPanel: false, // 是否显示私聊面板
+  
+  // 图片上传相关状态
+  uploadingImage: false, // 是否正在上传图片
+  pendingImage: null, // 待发送的图片 { file, preview, url }
+  
   closeWelcomeModal: () => {
     const { user } = get();
     // Mark this user as having seen the welcome modal
@@ -78,6 +89,29 @@ export const useChatStore = create((set, get) => ({
 
   closeKickCooldownModal: () => {
     set({ kickCooldownInfo: null });
+  },
+
+  // DM 相关方法
+  openDMPanel: () => set({ showDMPanel: true }),
+  closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [] }),
+  
+  clearPendingImage: () => {
+    const { pendingImage } = get();
+    if (pendingImage?.preview) {
+      URL.revokeObjectURL(pendingImage.preview);
+    }
+    set({ pendingImage: null });
+  },
+
+  clearDMUnread: (conversationId) => {
+    set((state) => {
+      const newDmList = state.dmList.map(conv => 
+        conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
+      );
+      const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+      return { dmList: newDmList, dmUnreadTotal };
+    });
+    socket.emit('mark_dm_read', conversationId);
   },
 
   // Actions
@@ -328,6 +362,67 @@ export const useChatStore = create((set, get) => ({
       }));
     });
 
+    // ======= DM 私聊事件监听 =======
+    
+    // 接收私聊消息
+    socket.on('receive_dm', ({ conversationId, message }) => {
+      const { currentDM } = get();
+      
+      // 如果是当前打开的会话，添加到消息列表
+      if (currentDM && currentDM.id === conversationId) {
+        set((state) => ({
+          dmMessages: [...state.dmMessages, message]
+        }));
+      }
+    });
+
+    // 私聊列表刷新请求
+    socket.on('refresh_dm_list', () => {
+      const { fetchDMList } = get();
+      fetchDMList();
+    });
+
+    // 私聊通知（更新未读数）
+    socket.on('dm_notification', ({ conversationId, lastMessage, timestamp }) => {
+      const { currentDM, dmList, fetchDMList } = get();
+      
+      // 检查是否是新会话
+      const exists = dmList.some(conv => conv.id === conversationId);
+      if (!exists) {
+        fetchDMList();
+        return;
+      }
+      
+      set((state) => {
+        // 准确判断是否是当前正在查看的会话
+        // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的
+        // 使用 String() 确保 ID 类型一致
+        const isViewing = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel;
+        
+        if (isViewing) {
+            // 如果正在查看，通知后端已读
+            socket.emit('mark_dm_read', conversationId);
+        }
+
+        const newDmList = state.dmList.map(conv => {
+          if (conv.id === conversationId) {
+            return {
+              ...conv,
+              lastMessage,
+              lastMessageAt: timestamp,
+              unreadCount: isViewing ? 0 : (conv.unreadCount || 0) + 1
+            };
+          }
+          return conv;
+        });
+        
+        // 计算总未读数
+        const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+        
+        return { dmList: newDmList, dmUnreadTotal };
+      });
+    });
+
     // Initial fetch
     socket.emit('get_rooms', (rooms) => {
         // Process cooldowns into timestamps
@@ -436,6 +531,16 @@ export const useChatStore = create((set, get) => ({
     return new Promise((resolve) => {
       const { currentRoom, messages, messageCache } = get();
       
+      // 如果当前已经在该房间，只关闭DM面板
+      if (currentRoom?.id === roomId) {
+        set({ showDMPanel: false });
+        resolve({ success: true });
+        return;
+      }
+
+      // 关闭 DM 面板
+      set({ showDMPanel: false });
+
       // Save current room messages to cache before switching
       if (currentRoom && messages.length > 0) {
         set((state) => ({
@@ -625,5 +730,250 @@ export const useChatStore = create((set, get) => ({
             resolve(response);
         });
     });
+  },
+
+  // ======= DM 私聊相关方法 =======
+  
+  // 搜索用户
+  searchUsers: (query) => {
+    return new Promise((resolve) => {
+      socket.emit('search_users', query, (response) => {
+        if (response.success) {
+          resolve(response.users);
+        } else {
+          resolve([]);
+        }
+      });
+    });
+  },
+
+  // 获取私聊列表
+  fetchDMList: () => {
+    return new Promise((resolve) => {
+      socket.emit('get_dm_list', (response) => {
+        if (response.success) {
+          const dmUnreadTotal = response.conversations.reduce(
+            (sum, conv) => sum + (conv.unreadCount || 0), 0
+          );
+          set({ dmList: response.conversations, dmUnreadTotal });
+          resolve(response.conversations);
+        } else {
+          resolve([]);
+        }
+      });
+    });
+  },
+
+  // 开始/进入私聊
+  startDM: (targetUserId, targetUsername) => {
+    return new Promise((resolve) => {
+      // 退出当前房间（如果存在）
+      if (get().currentRoom) {
+        get().leaveRoom();
+      }
+
+      socket.emit('start_dm', { targetUserId, targetUsername }, (response) => {
+        if (response.success) {
+          set({
+            currentDM: response.conversation,
+            dmMessages: response.history || [],
+            showDMPanel: true
+          });
+          
+          // 更新列表中的未读数
+          set((state) => {
+            const newDmList = state.dmList.map(conv => 
+              conv.id === response.conversation.id 
+                ? { ...conv, unreadCount: 0 }
+                : conv
+            );
+            const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+            return { dmList: newDmList, dmUnreadTotal };
+          });
+          
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, error: response.error });
+        }
+      });
+    });
+  },
+
+  // 进入已有的私聊会话
+  enterDM: (conversation) => {
+    return new Promise((resolve) => {
+      // 退出当前房间（如果存在）
+      if (get().currentRoom) {
+        get().leaveRoom();
+      }
+
+      socket.emit('enter_dm', conversation.id, (response) => {
+        if (response.success) {
+          set({
+            currentDM: conversation,
+            dmMessages: response.history || [],
+            showDMPanel: true
+          });
+          
+          // 更新列表中的未读数
+          set((state) => {
+            const newDmList = state.dmList.map(conv => 
+              conv.id === conversation.id 
+                ? { ...conv, unreadCount: 0 }
+                : conv
+            );
+            const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+            return { dmList: newDmList, dmUnreadTotal };
+          });
+          
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, error: response.error });
+        }
+      });
+    });
+  },
+
+  // 发送私聊消息
+  sendDMMessage: (text, imageUrl = null) => {
+    const { currentDM, replyingTo } = get();
+    if (!currentDM) return;
+    
+    const replyData = replyingTo ? {
+      id: replyingTo.id,
+      text: replyingTo.text,
+      sender: replyingTo.sender
+    } : null;
+
+    socket.emit('send_dm', {
+      conversationId: currentDM.id,
+      message: text,
+      imageUrl,
+      replyTo: replyData
+    });
+    
+    set({ replyingTo: null });
+  },
+
+  // 关闭私聊会话
+  closeDM: () => {
+    set({ currentDM: null, dmMessages: [], showDMPanel: false });
+  },
+
+  // ======= 图片上传相关方法 =======
+  
+  // 上传图片
+  uploadImage: async (file) => {
+    set({ uploadingImage: true });
+    
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        set({ uploadingImage: false });
+        return { success: true, imageUrl: result.imageUrl };
+      } else {
+        set({ uploadingImage: false });
+        return { success: false, error: result.error };
+      }
+    } catch (err) {
+      console.error('Upload error:', err);
+      set({ uploadingImage: false });
+      return { success: false, error: '上传失败' };
+    }
+  },
+
+  // 设置待发送的图片预览
+  setPendingImage: (file) => {
+    const preview = URL.createObjectURL(file);
+    set({ pendingImage: { file, preview, url: null } });
+  },
+
+  // 发送图片消息（群聊）
+  sendImageMessage: async (file) => {
+    const { currentRoom } = get();
+    if (!currentRoom) return { success: false };
+    
+    set({ uploadingImage: true });
+    
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // 发送图片消息
+        socket.emit('send_message', {
+          roomId: currentRoom.id,
+          message: '',
+          imageUrl: result.imageUrl,
+          replyTo: null
+        });
+        
+        set({ uploadingImage: false, pendingImage: null });
+        return { success: true };
+      } else {
+        set({ uploadingImage: false });
+        return { success: false, error: result.error };
+      }
+    } catch (err) {
+      console.error('Upload error:', err);
+      set({ uploadingImage: false });
+      return { success: false, error: '上传失败' };
+    }
+  },
+
+  // 发送图片私聊消息
+  sendDMImageMessage: async (file) => {
+    const { currentDM } = get();
+    if (!currentDM) return { success: false };
+    
+    set({ uploadingImage: true });
+    
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // 发送图片消息
+        socket.emit('send_dm', {
+          conversationId: currentDM.id,
+          message: '',
+          imageUrl: result.imageUrl,
+          replyTo: null
+        });
+        
+        set({ uploadingImage: false, pendingImage: null });
+        return { success: true };
+      } else {
+        set({ uploadingImage: false });
+        return { success: false, error: result.error };
+      }
+    } catch (err) {
+      console.error('Upload error:', err);
+      set({ uploadingImage: false });
+      return { success: false, error: '上传失败' };
+    }
   }
 }));
