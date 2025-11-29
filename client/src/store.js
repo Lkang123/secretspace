@@ -121,7 +121,15 @@ export const useChatStore = create((set, get) => ({
                 }
                 return room;
             });
-            return { rooms: newRooms };
+            
+            // Clear message cache for this room to force refresh on next join
+            const newCache = { ...state.messageCache };
+            delete newCache[roomId];
+            
+            return { 
+                rooms: newRooms,
+                messageCache: newCache
+            };
         });
     });
 
@@ -380,12 +388,17 @@ export const useChatStore = create((set, get) => ({
           // Restore messages from cache if available, otherwise use history
           const cachedMessages = get().messageCache[roomId];
           
+          // Reset unread count for this room
+          const updatedRooms = get().rooms.map(r => 
+            r.id === roomId ? { ...r, unreadCount: 0 } : r
+          );
+          
           set({ 
             currentRoom: room, 
             messages: cachedMessages || history || [],
             roomBanner: banner || null,
             hasJoined: true,
-            unreadCounts: { ...get().unreadCounts, [roomId]: 0 } // Reset unread count
+            rooms: updatedRooms
           });
           resolve({ success: true });
         } else {
