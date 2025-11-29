@@ -39,7 +39,7 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-full md:w-72 h-screen flex flex-col bg-white/90 dark:bg-zinc-950/95 backdrop-blur-xl border-r border-zinc-200/40 dark:border-zinc-700/40 transition-colors duration-300 shadow-lg">
+    <div className="w-full md:w-72 h-dvh flex flex-col bg-white/90 dark:bg-zinc-950/95 backdrop-blur-xl border-r border-zinc-200/40 dark:border-zinc-700/40 transition-colors duration-300 shadow-lg">
       {/* Header / User Info */}
       <div className="p-4 backdrop-blur-md bg-white/50 dark:bg-zinc-900/50">
         <div className="flex items-center justify-between px-2 mb-6">

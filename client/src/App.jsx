@@ -226,7 +226,7 @@ function App() {
     return (
       <>
         {forceLogoutModal}
-        <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
+        <div className="min-h-dvh bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
           <div className="flex flex-col items-center gap-3">
             <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -257,7 +257,7 @@ function App() {
           transform: 'translateY(-50%)',
         }}
       />
-      <div className="h-screen flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300 overflow-hidden">
+      <div className="h-dvh flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300 overflow-hidden">
         <div className={`${currentRoom ? 'hidden md:block' : 'block'} w-full md:w-auto h-full z-20`}>
            <Sidebar />
         </div>

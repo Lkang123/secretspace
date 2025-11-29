@@ -57,7 +57,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-300">
+    <div className="min-h-dvh bg-white dark:bg-black flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-300">
 
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}

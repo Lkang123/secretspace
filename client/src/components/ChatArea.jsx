@@ -15,7 +15,6 @@ export default function ChatArea() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  const inputContainerRef = useRef(null);
 
   // Reset banner dismissed state when banner changes
   useEffect(() => {
@@ -60,17 +59,6 @@ export default function ChatArea() {
       inputRef.current?.focus();
     }
   }, [replyingTo]);
-
-  // Handle input focus - scroll into view when keyboard appears
-  const handleInputFocus = () => {
-    // Delay scroll to allow keyboard animation to complete
-    setTimeout(() => {
-      inputContainerRef.current?.scrollIntoView({ 
-        behavior: 'smooth', 
-        block: 'end' 
-      });
-    }, 300);
-  };
 
   const copyRoomId = async () => {
     if (!currentRoom) return;
@@ -345,7 +333,7 @@ export default function ChatArea() {
       </div>
 
       {/* Input Area */}
-      <div ref={inputContainerRef} className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black">
+      <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black">
         {/* Reply Preview Bar */}
         <AnimatePresence>
           {replyingTo && (
@@ -386,7 +374,6 @@ export default function ChatArea() {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onFocus={handleInputFocus}
                 placeholder="What's happening?"
                 className="flex-1 h-12 px-3 sm:px-4 bg-transparent text-[15px] sm:text-[17px] text-zinc-900 dark:text-white placeholder-zinc-500 focus:outline-none min-w-0"
               />
