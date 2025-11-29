@@ -372,44 +372,48 @@ export const useChatStore = create((set, get) => ({
         }));
       }
       
-      socket.emit('join_room', roomId, ({ success, room, history, banner, error }) => {
+      socket.emit('join_room', roomId, ({ success, room, history, banner, error, cooldown, remainingSeconds, roomName }) => {
         if (success) {
           // Save last room for auto-rejoin
           localStorage.setItem('last_room_id', roomId);
           
-          // Clear unread count for this room
-          set((state) => ({
-              rooms: state.rooms.map(r => 
-                  r.id === roomId ? { ...r, unreadCount: 0 } : r
-              )
-          }));
-
-          // Use server history, or fallback to local cache
-          const serverMessages = (history || []).map(msg => ({
-            ...msg,
-            id: `${msg.id}-${Math.random().toString(36).substr(2, 9)}`
-          }));
+          // Restore messages from cache if available, otherwise use history
+          const cachedMessages = get().messageCache[roomId];
           
-          set({ currentRoom: room, messages: serverMessages, roomBanner: banner || null });
+          set({ 
+            currentRoom: room, 
+            messages: cachedMessages || history || [],
+            roomBanner: banner || null,
+            hasJoined: true,
+            unreadCounts: { ...get().unreadCounts, [roomId]: 0 } // Reset unread count
+          });
           resolve({ success: true });
         } else {
-          // If join failed due to kick cooldown, show modal
-          if (error && error.includes('分钟后再试')) {
-            // Find the room name from rooms list
-            const targetRoom = get().rooms.find(r => r.id === roomId);
-            const roomName = targetRoom ? targetRoom.name : '该房间';
-            set({ kickCooldownInfo: { roomName, error } });
-            resolve({ success: false, error });
-          } else {
-            // Other errors (e.g. room deleted), clear storage
-            if (error === 'Room not found') {
-                localStorage.removeItem('last_room_id');
-            }
-            resolve({ success: false, error });
-          }
+           // Check if it's a cooldown error
+           if (cooldown) {
+               set({ 
+                   kickCooldownInfo: {
+                       roomName: roomName,
+                       cooldownUntil: Date.now() + (remainingSeconds * 1000)
+                   }
+               });
+           } else {
+               // Only alert if not cooldown (handled by modal)
+               if (error) alert(error);
+               
+               // If room not found, clear storage
+               if (error === 'Room not found') {
+                   localStorage.removeItem('last_room_id');
+               }
+           }
+           resolve({ success: false, error });
         }
       });
     });
+  },
+
+  closeCurrentRoom: () => {
+      set({ currentRoom: null });
   },
 
   leaveRoom: () => {

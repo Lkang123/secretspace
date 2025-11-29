@@ -13,6 +13,7 @@ function App() {
     user, 
     initSocket, 
     connected, 
+    currentRoom,
     showWelcomeModal, 
     closeWelcomeModal, 
     showAdminWelcomeModal,
@@ -255,9 +256,13 @@ function App() {
           transform: 'translateY(-50%)',
         }}
       />
-      <div className="h-screen flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300">
-        <Sidebar />
-        <ChatArea />
+      <div className="h-screen flex bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300 overflow-hidden">
+        <div className={`${currentRoom ? 'hidden md:block' : 'block'} w-full md:w-auto h-full z-20`}>
+           <Sidebar />
+        </div>
+        <div className={`${!currentRoom ? 'hidden md:flex' : 'flex'} flex-1 h-full w-full relative z-10`}>
+           <ChatArea />
+        </div>
       </div>
 
       {/* Welcome Modal for New Users */}
