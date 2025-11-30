@@ -275,15 +275,11 @@ export const useChatStore = create((set, get) => ({
       // For now, server sends senderId which is persistentId.
       // Frontend user object should also have persistentId.
       
-      console.log('[receive_message] 收到消息, id:', message.id, 'type:', typeof message.id);
-      
-      // 保留原始 ID 用于后端操作，添加单独的 key 给 React 渲染
+// 保留原始 ID 用于后端操作，添加单独的 key 给 React 渲染
       const uniqueMessage = {
         ...message,
         _key: `${message.id}-${Math.random().toString(36).substr(2, 9)}`
       };
-      
-      console.log('[receive_message] 处理后, id:', uniqueMessage.id, '_key:', uniqueMessage._key);
       
       // Update both current messages and cache, keeping only last MAX_MESSAGES
       set((state) => {
