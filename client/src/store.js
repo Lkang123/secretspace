@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 
+const MAX_MESSAGES = 300;
+
 // Socket.io 客户端配置 - 优化连接稳定性
 const socket = io({
   // 重连配置
@@ -279,9 +281,9 @@ export const useChatStore = create((set, get) => ({
         id: `${message.id}-${Math.random().toString(36).substr(2, 9)}`
       };
       
-      // Update both current messages and cache
+      // Update both current messages and cache, keeping only last MAX_MESSAGES
       set((state) => {
-        const newMessages = [...state.messages, uniqueMessage];
+        const newMessages = [...state.messages, uniqueMessage].slice(-MAX_MESSAGES);
         const newCache = { ...state.messageCache };
         if (currentRoom) {
           newCache[currentRoom.id] = newMessages;
@@ -299,7 +301,7 @@ export const useChatStore = create((set, get) => ({
       };
       
       set((state) => {
-        const newMessages = [...state.messages, sysMsg];
+        const newMessages = [...state.messages, sysMsg].slice(-MAX_MESSAGES);
         const newCache = { ...state.messageCache };
         if (currentRoom) {
           newCache[currentRoom.id] = newMessages;
@@ -370,9 +372,10 @@ export const useChatStore = create((set, get) => ({
       
       // 如果是当前打开的会话，添加到消息列表
       if (currentDM && currentDM.id === conversationId) {
-        set((state) => ({
-          dmMessages: [...state.dmMessages, message]
-        }));
+        set((state) => {
+          const newMessages = [...state.dmMessages, message].slice(-MAX_MESSAGES);
+          return { dmMessages: newMessages };
+        });
       }
     });
 
@@ -561,9 +564,12 @@ export const useChatStore = create((set, get) => ({
             r.id === roomId ? { ...r, unreadCount: 0 } : r
           );
           
+          const baseMessages = cachedMessages || history || [];
+          const limitedMessages = baseMessages.slice(-MAX_MESSAGES);
+
           set({ 
             currentRoom: room, 
-            messages: cachedMessages || history || [],
+            messages: limitedMessages,
             roomBanner: banner || null,
             hasJoined: true,
             rooms: updatedRooms

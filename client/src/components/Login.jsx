@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useChatStore } from '../store';
-import { MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { useThemeStore } from '../themeStore';
+import { MessageCircle, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 
 export default function Login() {
   const login = useChatStore((state) => state.login);
+  const { theme, toggleTheme } = useThemeStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -59,10 +61,19 @@ export default function Login() {
   return (
     <div className="min-h-dvh bg-white dark:bg-black flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-300">
 
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="absolute top-4 right-4 p-2 rounded-full text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
+        title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+      >
+        {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
+
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
         className="w-full max-w-[400px] relative z-10"
       >
         <div className="w-full">

@@ -40,6 +40,7 @@ export default function ChatArea() {
   const [previewImage, setPreviewImage] = useState(null); // { file, preview }
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [expiredImages, setExpiredImages] = useState(() => new Set());
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -54,6 +55,16 @@ export default function ChatArea() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const markImageExpired = (url) => {
+    if (!url) return;
+    setExpiredImages((prev) => {
+      if (prev.has(url)) return prev;
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -448,20 +459,26 @@ export default function ChatArea() {
                   )}
 
                   {/* 图片消息 */}
-                  {msg.imageUrl && (
+                  {msg.imageUrl && !expiredImages.has(msg.imageUrl) && (
                     <img
                       src={msg.imageUrl}
                       alt="Shared image"
                       className="max-w-[280px] max-h-[280px] rounded-xl cursor-zoom-in hover:opacity-90 transition-opacity"
                       onLoad={scrollToBottom}
+                      onError={() => markImageExpired(msg.imageUrl)}
                       onClick={() => {
-                        // 找到所有图片消息的索引
-                        const imageMessages = messages.filter(m => m.imageUrl);
+                        const imageMessages = messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl));
                         const index = imageMessages.findIndex(m => m.imageUrl === msg.imageUrl);
                         setLightboxIndex(index >= 0 ? index : 0);
                         setLightboxOpen(true);
                       }}
                     />
+                  )}
+                  {msg.imageUrl && expiredImages.has(msg.imageUrl) && (
+                    <div className="max-w-[280px] max-h-[280px] rounded-xl bg-zinc-100 dark:bg-zinc-800 flex flex-col items-center justify-center px-4 py-6 text-xs text-zinc-500 dark:text-zinc-400 text-center">
+                      <span className="font-medium mb-1">图片已过期</span>
+                      <span className="text-[11px] opacity-80">超过15天的图片会被自动清理</span>
+                    </div>
                   )}
 
                   {/* 文本消息 */}
@@ -514,12 +531,18 @@ export default function ChatArea() {
             className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800"
           >
               <div className="flex items-center gap-3 overflow-hidden">
-                {replyingTo.imageUrl && (
+                {replyingTo.imageUrl && !expiredImages.has(replyingTo.imageUrl) && (
                   <img 
                     src={replyingTo.imageUrl} 
                     alt="Reply preview" 
                     className="w-10 h-10 rounded-md object-cover shrink-0"
+                    onError={() => markImageExpired(replyingTo.imageUrl)}
                   />
+                )}
+                {replyingTo.imageUrl && expiredImages.has(replyingTo.imageUrl) && (
+                  <div className="w-10 h-10 rounded-md bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-500 dark:text-zinc-400 text-center px-1">
+                    已过期
+                  </div>
                 )}
                 <div className="flex flex-col overflow-hidden border-l-2 border-zinc-400 pl-3">
                   <span className="text-xs font-bold text-zinc-900 dark:text-zinc-200 mb-0.5">
@@ -721,7 +744,7 @@ export default function ChatArea() {
           open={lightboxOpen}
           close={() => setLightboxOpen(false)}
           index={lightboxIndex}
-          slides={messages.filter(m => m.imageUrl).map(m => ({ src: m.imageUrl }))}
+          slides={messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }))}
           zoom={{
             maxZoomPixelRatio: 5,
             zoomInMultiplier: 2,

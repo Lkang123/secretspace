@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'database.sqlite');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const IMAGE_RETENTION_DAYS = 15;
 
 // 确保上传目录存在
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -37,6 +38,33 @@ const upload = multer({
     }
   }
 });
+
+function cleanupOldImages() {
+  fs.promises.readdir(UPLOADS_DIR)
+    .then((files) => {
+      const tasks = files.map(async (file) => {
+        const match = file.match(/^img_(\d+)_/);
+        if (!match) return;
+        const timestamp = Number(match[1]);
+        if (!Number.isFinite(timestamp)) return;
+        const ageMs = Date.now() - timestamp;
+        const ageDays = ageMs / (1000 * 60 * 60 * 24);
+        if (ageDays > IMAGE_RETENTION_DAYS) {
+          const fullPath = path.join(UPLOADS_DIR, file);
+          try {
+            await fs.promises.unlink(fullPath);
+            console.log(`Deleted old image: ${file}`);
+          } catch (err) {
+            console.error('Failed to delete image', file, err);
+          }
+        }
+      });
+      return Promise.all(tasks);
+    })
+    .catch((err) => {
+      console.error('Failed to cleanup uploads directory', err);
+    });
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -1717,6 +1745,9 @@ io.on('connection', (socket) => {
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
 });
+
+cleanupOldImages();
+setInterval(cleanupOldImages, 24 * 60 * 60 * 1000);
 
 const PORT = 3001; // Hardcoded to avoid .env conflicts
 httpServer.listen(PORT, () => {
