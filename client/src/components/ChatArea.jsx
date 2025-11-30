@@ -460,6 +460,7 @@ export default function ChatArea() {
                       {isMe && !msg.recalled && (
                         <button 
                           onClick={async () => {
+                            console.log('[撤回] msg.id:', msg.id, 'type:', typeof msg.id);
                             const res = await recallMessage(msg.id);
                             if (!res.success) showAlert(res.error, { variant: 'danger' });
                             setActiveMenuMsgId(null);
