@@ -1,12 +1,28 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import EmojiPicker from 'emoji-picker-react';
-import Lightbox from 'yet-another-react-lightbox';
-import Zoom from 'yet-another-react-lightbox/plugins/zoom';
 import 'yet-another-react-lightbox/styles.css';
 import { useChatStore } from '../store';
 import { Hash, ArrowLeft, Copy, Check, Reply, X, Smile, Megaphone, Volume2, Image, Loader2 } from 'lucide-react';
 import { getAvatarColor, getInitials, getAvatarUrl, getPresetAvatarUrl } from '../utils';
+
+const EmojiPickerLazy = React.lazy(() => import('emoji-picker-react'));
+
+const LightboxLazy = React.lazy(async () => {
+  const [mod, zoomMod] = await Promise.all([
+    import('yet-another-react-lightbox'),
+    import('yet-another-react-lightbox/plugins/zoom'),
+  ]);
+  const Lightbox = mod.default;
+  const Zoom = zoomMod.default;
+  return {
+    default: (props) => (
+      <Lightbox
+        plugins={[Zoom]}
+        {...props}
+      />
+    ),
+  };
+});
 
 export default function ChatArea() {
   const { 
@@ -597,22 +613,26 @@ export default function ChatArea() {
                     
                     {/* Desktop: Absolute positioning */}
                     <div className="hidden md:block absolute bottom-11 right-0 z-50">
-                      <EmojiPicker
-                        onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
-                        lazyLoadEmojis
-                        width={350}
-                        height={400}
-                      />
+                      <Suspense fallback={null}>
+                        <EmojiPickerLazy
+                          onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
+                          lazyLoadEmojis
+                          width={350}
+                          height={400}
+                        />
+                      </Suspense>
                     </div>
                     
                     {/* Mobile: Fixed centered modal */}
                     <div className="md:hidden fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90vw] max-w-[350px]">
-                      <EmojiPicker
-                        onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
-                        lazyLoadEmojis
-                        width="100%"
-                        height={350}
-                      />
+                      <Suspense fallback={null}>
+                        <EmojiPickerLazy
+                          onEmojiClick={(emojiData) => handleEmojiClick(emojiData.emoji)}
+                          lazyLoadEmojis
+                          width="100%"
+                          height={350}
+                        />
+                      </Suspense>
                     </div>
                   </>
                 )}
@@ -696,29 +716,30 @@ export default function ChatArea() {
       </AnimatePresence>
 
       {/* Image Lightbox */}
-      <Lightbox
-        open={lightboxOpen}
-        close={() => setLightboxOpen(false)}
-        index={lightboxIndex}
-        slides={messages.filter(m => m.imageUrl).map(m => ({ src: m.imageUrl }))}
-        plugins={[Zoom]}
-        zoom={{
-          maxZoomPixelRatio: 5,
-          zoomInMultiplier: 2,
-          doubleTapDelay: 300,
-          doubleClickDelay: 300,
-          doubleClickMaxStops: 2,
-          keyboardMoveDistance: 50,
-          wheelZoomDistanceFactor: 100,
-          pinchZoomDistanceFactor: 100,
-          scrollToZoom: true
-        }}
-        carousel={{ finite: true }}
-        controller={{ closeOnBackdropClick: true }}
-        styles={{
-          container: { backgroundColor: 'rgba(0, 0, 0, 0.9)' }
-        }}
-      />
+      <Suspense fallback={null}>
+        <LightboxLazy
+          open={lightboxOpen}
+          close={() => setLightboxOpen(false)}
+          index={lightboxIndex}
+          slides={messages.filter(m => m.imageUrl).map(m => ({ src: m.imageUrl }))}
+          zoom={{
+            maxZoomPixelRatio: 5,
+            zoomInMultiplier: 2,
+            doubleTapDelay: 300,
+            doubleClickDelay: 300,
+            doubleClickMaxStops: 2,
+            keyboardMoveDistance: 50,
+            wheelZoomDistanceFactor: 100,
+            pinchZoomDistanceFactor: 100,
+            scrollToZoom: true
+          }}
+          carousel={{ finite: true }}
+          controller={{ closeOnBackdropClick: true }}
+          styles={{
+            container: { backgroundColor: 'rgba(0, 0, 0, 0.9)' }
+          }}
+        />
+      </Suspense>
       </div>
   );
 }
