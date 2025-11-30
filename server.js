@@ -171,6 +171,25 @@ class DataPersistence {
       this.db.run("ALTER TABLE messages ADD COLUMN image_url TEXT", (err) => {
         // Ignore error if column already exists
       });
+      
+      // Add recalled column for message recall feature
+      this.db.run("ALTER TABLE messages ADD COLUMN recalled INTEGER DEFAULT 0", (err) => {
+        // Ignore error if column already exists
+      });
+      
+      // Add recalled column for DM messages
+      this.db.run("ALTER TABLE dm_messages ADD COLUMN recalled INTEGER DEFAULT 0", (err) => {
+        // Ignore error if column already exists
+      });
+      
+      // Add reply_to_image_url column for storing image URL in replies
+      this.db.run("ALTER TABLE messages ADD COLUMN reply_to_image_url TEXT", (err) => {
+        // Ignore error if column already exists
+      });
+      
+      this.db.run("ALTER TABLE dm_messages ADD COLUMN reply_to_image_url TEXT", (err) => {
+        // Ignore error if column already exists
+      });
     });
   }
 
@@ -247,8 +266,8 @@ class DataPersistence {
     return new Promise((resolve, reject) => {
       const stmt = this.db.prepare(`
         INSERT INTO messages 
-        (room_id, sender_id, sender_name, message, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, is_admin, image_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (room_id, sender_id, sender_name, message, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, is_admin, image_url, reply_to_image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       stmt.run(
@@ -263,12 +282,14 @@ class DataPersistence {
         msgData.senderAvatarId || null,
         msgData.isAdmin ? 1 : 0,
         msgData.imageUrl || null,
-        (err) => {
+        msgData.replyTo?.imageUrl || null,
+        function(err) {
           if (err) {
             console.error('Error saving message:', err);
             reject(err);
           } else {
-            resolve();
+            // 返回数据库生成的 ID
+            resolve(this.lastID);
           }
         }
       );
@@ -301,10 +322,12 @@ class DataPersistence {
               isAdmin: row.is_admin === 1,
               timestamp: row.timestamp,
               imageUrl: row.image_url || null,
+              recalled: row.recalled === 1,
               replyTo: row.reply_to_id ? {
                 id: row.reply_to_id,
                 sender: row.reply_to_sender,
-                text: row.reply_to_text
+                text: row.reply_to_text,
+                imageUrl: row.reply_to_image_url || null
               } : null
             }));
             resolve(messages);
@@ -404,8 +427,8 @@ class DataPersistence {
     return new Promise((resolve, reject) => {
       const stmt = this.db.prepare(`
         INSERT INTO dm_messages 
-        (conversation_id, sender_id, sender_name, message, image_url, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (conversation_id, sender_id, sender_name, message, image_url, timestamp, reply_to_id, reply_to_sender, reply_to_text, sender_avatar_id, reply_to_image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       stmt.run(
@@ -419,6 +442,7 @@ class DataPersistence {
         msgData.replyTo?.sender || null,
         msgData.replyTo?.text || null,
         msgData.senderAvatarId || null,
+        msgData.replyTo?.imageUrl || null,
         function(err) {
           if (err) {
             console.error('Error saving DM message:', err);
@@ -460,10 +484,12 @@ class DataPersistence {
             senderAvatarId: row.sender_avatar_id,
             timestamp: row.timestamp,
             isRead: row.is_read === 1,
+            recalled: row.recalled === 1,
             replyTo: row.reply_to_id ? {
               id: row.reply_to_id,
               sender: row.reply_to_sender,
-              text: row.reply_to_text
+              text: row.reply_to_text,
+              imageUrl: row.reply_to_image_url || null
             } : null
           }));
           
@@ -504,6 +530,92 @@ class DataPersistence {
         }
       }
       resolve(results.slice(0, 20)); // 最多返回20个结果
+    });
+  }
+
+  // ======= 消息撤回/删除方法 =======
+  
+  // 撤回房间消息
+  recallMessage(messageId, roomId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `UPDATE messages SET recalled = 1 WHERE id = ? AND room_id = ?`,
+        [messageId, roomId],
+        function(err) {
+          if (err) return reject(err);
+          resolve(this.changes > 0);
+        }
+      );
+    });
+  }
+
+  // 删除房间消息
+  deleteMessage(messageId, roomId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `DELETE FROM messages WHERE id = ? AND room_id = ?`,
+        [messageId, roomId],
+        function(err) {
+          if (err) return reject(err);
+          resolve(this.changes > 0);
+        }
+      );
+    });
+  }
+
+  // 撤回私聊消息
+  recallDMMessage(messageId, conversationId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `UPDATE dm_messages SET recalled = 1 WHERE id = ? AND conversation_id = ?`,
+        [messageId, conversationId],
+        function(err) {
+          if (err) return reject(err);
+          resolve(this.changes > 0);
+        }
+      );
+    });
+  }
+
+  // 删除私聊消息
+  deleteDMMessage(messageId, conversationId) {
+    return new Promise((resolve, reject) => {
+      this.db.run(
+        `DELETE FROM dm_messages WHERE id = ? AND conversation_id = ?`,
+        [messageId, conversationId],
+        function(err) {
+          if (err) return reject(err);
+          resolve(this.changes > 0);
+        }
+      );
+    });
+  }
+
+  // 获取单条消息（用于验证权限）
+  getMessage(messageId, roomId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT * FROM messages WHERE id = ? AND room_id = ?`,
+        [messageId, roomId],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(row);
+        }
+      );
+    });
+  }
+
+  // 获取单条私聊消息
+  getDMMessage(messageId, conversationId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT * FROM dm_messages WHERE id = ? AND conversation_id = ?`,
+        [messageId, conversationId],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(row);
+        }
+      );
     });
   }
 }
@@ -941,6 +1053,20 @@ io.on('connection', (socket) => {
     // Get room banner if exists
     const banner = roomBanners.get(roomId) || null;
     
+    // 获取历史消息中涉及的用户的最新头像
+    const userAvatars = {};
+    const senderNames = new Set(history.map(msg => msg.sender));
+    for (const senderName of senderNames) {
+      // 查找用户凭证获取最新头像
+      for (const [credUsername, cred] of userCredentials.entries()) {
+        const displayName = cred.isAdmin ? '超级董事长' : credUsername;
+        if (displayName === senderName && cred.avatarId !== undefined) {
+          userAvatars[senderName] = cred.avatarId;
+          break;
+        }
+      }
+    }
+    
     // Notify admins about new room update
     broadcastAdminRoomUpdate(roomId);
 
@@ -953,7 +1079,8 @@ io.on('connection', (socket) => {
         ownerId: room.ownerId
       },
       history,
-      banner
+      banner,
+      userAvatars  // 返回用户头像映射
     });
   });
 
@@ -1011,7 +1138,6 @@ io.on('connection', (socket) => {
     if (user.currentRoom !== roomId) return;
 
     const msgData = {
-      id: Date.now(),
       text: message || '',
       imageUrl: imageUrl || null, // 图片URL
       sender: user.username,
@@ -1022,12 +1148,13 @@ io.on('connection', (socket) => {
       replyTo: replyTo || null // Add replyTo field
     };
 
-    // Save message to database (persistent storage)
+    // Save message to database (persistent storage) and get the real ID
     try {
-      await persistence.saveMessage(msgData, roomId);
+      const dbId = await persistence.saveMessage(msgData, roomId);
+      msgData.id = dbId; // 使用数据库生成的 ID
     } catch (err) {
       console.error('Failed to save message to database:', err);
-      // Continue anyway - message will be broadcast but not persisted
+      msgData.id = Date.now(); // 回退使用时间戳
     }
 
     // Also keep in memory cache for quick access (last 100 messages)
@@ -1047,8 +1174,9 @@ io.on('connection', (socket) => {
         // Skip if user is in the room (they already got receive_message)
         if (socketUser.currentRoom === roomId) continue;
 
-        // Check if user has joined this room
-        const cred = userCredentials.get(socketUser.username);
+        // Check if user has joined this room (use realUsername for admin)
+        const credKey = socketUser.realUsername || socketUser.username;
+        const cred = userCredentials.get(credKey);
         if (cred && cred.joinedRooms && cred.joinedRooms.includes(roomId)) {
             io.to(socketId).emit('room_notification', {
                 roomId,
@@ -1092,6 +1220,103 @@ io.on('connection', (socket) => {
     
     if (callback) callback({ success: true, banner });
     console.log(`Admin set banner for room ${roomId}: ${message}`);
+  });
+
+  // 5.6 撤回消息 (2分钟内可撤回自己的消息)
+  socket.on('recall_message', async ({ messageId, roomId }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    try {
+      // 获取消息验证权限
+      const msg = await persistence.getMessage(messageId, roomId);
+      if (!msg) {
+        return callback && callback({ success: false, error: '消息不存在' });
+      }
+
+      // 检查是否是自己的消息或管理员
+      if (msg.sender_id !== user.persistentId && !user.isAdmin) {
+        return callback && callback({ success: false, error: '只能撤回自己的消息' });
+      }
+
+      // 检查时间限制（2分钟内，管理员无限制）
+      const msgTime = new Date(msg.timestamp).getTime();
+      const now = Date.now();
+      const twoMinutes = 2 * 60 * 1000;
+      if (!user.isAdmin && (now - msgTime) > twoMinutes) {
+        return callback && callback({ success: false, error: '超过2分钟无法撤回' });
+      }
+
+      // 执行撤回
+      await persistence.recallMessage(messageId, roomId);
+
+      // 更新内存缓存
+      const history = messageHistory.get(roomId);
+      if (history) {
+        const msgIndex = history.findIndex(m => m.id === messageId);
+        if (msgIndex >= 0) {
+          history[msgIndex].recalled = true;
+        }
+      }
+
+      // 广播给房间内所有人
+      io.to(roomId).emit('message_recalled', { messageId, roomId, recalledBy: user.username });
+
+      if (callback) callback({ success: true });
+      console.log(`Message ${messageId} recalled by ${user.username} in room ${roomId}`);
+    } catch (err) {
+      console.error('Recall message error:', err);
+      if (callback) callback({ success: false, error: '撤回失败' });
+    }
+  });
+
+  // 5.7 删除消息 (管理员可删除任何消息，普通用户可删除自己的已撤回消息)
+  socket.on('delete_message', async ({ messageId, roomId }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    try {
+      // 获取消息验证权限
+      const msg = await persistence.getMessage(messageId, roomId);
+      if (!msg) {
+        return callback && callback({ success: false, error: '消息不存在' });
+      }
+
+      // 权限检查：管理员可删除任何消息，普通用户只能删除自己的已撤回消息
+      const isOwner = msg.sender_id === user.persistentId;
+      const isRecalled = msg.recalled === 1;
+      if (!user.isAdmin && !(isOwner && isRecalled)) {
+        return callback && callback({ success: false, error: '只能删除自己已撤回的消息' });
+      }
+
+      // 执行删除
+      const deleted = await persistence.deleteMessage(messageId, roomId);
+      if (!deleted) {
+        return callback && callback({ success: false, error: '删除失败' });
+      }
+
+      // 更新内存缓存
+      const history = messageHistory.get(roomId);
+      if (history) {
+        const msgIndex = history.findIndex(m => m.id === messageId);
+        if (msgIndex >= 0) {
+          history.splice(msgIndex, 1);
+        }
+      }
+
+      // 广播给房间内所有人
+      io.to(roomId).emit('message_deleted', { messageId, roomId });
+
+      if (callback) callback({ success: true });
+      console.log(`Message ${messageId} deleted by ${user.username} in room ${roomId}`);
+    } catch (err) {
+      console.error('Delete message error:', err);
+      if (callback) callback({ success: false, error: '删除失败' });
+    }
   });
 
   // 5.6 Clear Room Banner (Admin only)
@@ -1695,6 +1920,89 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.error('Mark DM read error:', err);
       if (callback) callback({ success: false, error: 'Failed to mark as read' });
+    }
+  });
+
+  // 18. 撤回私聊消息 (2分钟内可撤回自己的消息)
+  socket.on('recall_dm_message', async ({ messageId, conversationId }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    try {
+      // 获取消息验证权限
+      const msg = await persistence.getDMMessage(messageId, conversationId);
+      if (!msg) {
+        return callback && callback({ success: false, error: '消息不存在' });
+      }
+
+      // 检查是否是自己的消息或管理员
+      if (msg.sender_id !== user.persistentId && !user.isAdmin) {
+        return callback && callback({ success: false, error: '只能撤回自己的消息' });
+      }
+
+      // 检查时间限制（2分钟内，管理员无限制）
+      const msgTime = new Date(msg.timestamp).getTime();
+      const now = Date.now();
+      const twoMinutes = 2 * 60 * 1000;
+      if (!user.isAdmin && (now - msgTime) > twoMinutes) {
+        return callback && callback({ success: false, error: '超过2分钟无法撤回' });
+      }
+
+      // 执行撤回
+      await persistence.recallDMMessage(messageId, conversationId);
+
+      // 广播给会话中的所有人
+      io.to(`dm:${conversationId}`).emit('dm_message_recalled', { 
+        messageId, 
+        conversationId, 
+        recalledBy: user.username 
+      });
+
+      if (callback) callback({ success: true });
+      console.log(`DM message ${messageId} recalled by ${user.username}`);
+    } catch (err) {
+      console.error('Recall DM message error:', err);
+      if (callback) callback({ success: false, error: '撤回失败' });
+    }
+  });
+
+  // 19. 删除私聊消息 (管理员可删除任何消息，普通用户可删除自己的已撤回消息)
+  socket.on('delete_dm_message', async ({ messageId, conversationId }, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    try {
+      // 获取消息验证权限
+      const msg = await persistence.getDMMessage(messageId, conversationId);
+      if (!msg) {
+        return callback && callback({ success: false, error: '消息不存在' });
+      }
+
+      // 权限检查：管理员可删除任何消息，普通用户只能删除自己的已撤回消息
+      const isOwner = msg.sender_id === user.persistentId;
+      const isRecalled = msg.recalled === 1;
+      if (!user.isAdmin && !(isOwner && isRecalled)) {
+        return callback && callback({ success: false, error: '只能删除自己已撤回的消息' });
+      }
+
+      // 执行删除
+      const deleted = await persistence.deleteDMMessage(messageId, conversationId);
+      if (!deleted) {
+        return callback && callback({ success: false, error: '删除失败' });
+      }
+
+      // 广播给会话中的所有人
+      io.to(`dm:${conversationId}`).emit('dm_message_deleted', { messageId, conversationId });
+
+      if (callback) callback({ success: true });
+      console.log(`DM message ${messageId} deleted by ${user.username}`);
+    } catch (err) {
+      console.error('Delete DM message error:', err);
+      if (callback) callback({ success: false, error: '删除失败' });
     }
   });
   

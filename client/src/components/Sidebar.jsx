@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '../store';
 import { useThemeStore } from '../themeStore';
@@ -30,10 +30,17 @@ export default function Sidebar() {
   const [userSearchResults, setUserSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  // 检查是否有冷却中的房间
+  const hasCooldownRoom = useMemo(() => {
+    return rooms.some(r => r.cooldownUntil && r.cooldownUntil > Date.now());
+  }, [rooms]);
+
+  // 只在有冷却房间时才启动定时器
   useEffect(() => {
+    if (!hasCooldownRoom) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [hasCooldownRoom]);
 
   // 获取私聊列表
   useEffect(() => {

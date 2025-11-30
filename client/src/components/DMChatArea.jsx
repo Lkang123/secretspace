@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, Suspense } from 'react';
+import React, { useState, useRef, useEffect, Suspense, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'yet-another-react-lightbox/styles.css';
 import { useChatStore } from '../store';
-import { ArrowLeft, Reply, X, Smile, Image, Loader2, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Reply, X, Smile, Image, Loader2, MessageCircle, Undo2, Trash2 } from 'lucide-react';
+import { showAlert, showConfirm } from './Dialog';
 import { getPresetAvatarUrl } from '../utils';
 
 const EmojiPickerLazy = React.lazy(() => import('emoji-picker-react'));
@@ -27,7 +28,9 @@ const LightboxLazy = React.lazy(async () => {
 export default function DMChatArea() {
   const { 
     currentDM, dmMessages, sendDMMessage, user, closeDM, setReplyingTo, replyingTo,
-    uploadingImage, sendDMImageMessage, connected, clearDMUnread
+    uploadingImage, sendDMImageMessage, connected, clearDMUnread,
+    // 消息撤回/删除
+    recallDMMessage, deleteDMMessage
   } = useChatStore();
   
   const [input, setInput] = useState('');
@@ -36,15 +39,24 @@ export default function DMChatArea() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [expiredImages, setExpiredImages] = useState(() => new Set());
+  const [activeMenuMsgId, setActiveMenuMsgId] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // 点击外部关闭消息菜单
+  useEffect(() => {
+    if (!activeMenuMsgId) return;
+    const handleClick = () => setActiveMenuMsgId(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [activeMenuMsgId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const markImageExpired = (url) => {
+  const markImageExpired = useCallback((url) => {
     if (!url) return;
     setExpiredImages((prev) => {
       if (prev.has(url)) return prev;
@@ -52,7 +64,12 @@ export default function DMChatArea() {
       next.add(url);
       return next;
     });
-  };
+  }, []);
+
+  // Memoize lightbox slides to avoid recalculation on every render
+  const lightboxSlides = useMemo(() => {
+    return dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
+  }, [dmMessages, expiredImages]);
 
   useEffect(() => {
     scrollToBottom();
@@ -139,12 +156,12 @@ export default function DMChatArea() {
     if (!file) return;
     
     if (!file.type.startsWith('image/')) {
-      alert('只支持图片文件');
+      showAlert('只支持图片文件', { variant: 'warning' });
       return;
     }
     
     if (file.size > 20 * 1024 * 1024) {
-      alert('图片最大支持20MB');
+      showAlert('图片最大支持20MB', { variant: 'warning' });
       return;
     }
     
@@ -264,10 +281,8 @@ export default function DMChatArea() {
           const isMe = msg.senderId === user.id;
 
           return (
-            <motion.div
+            <div
               key={msg.id || i}
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
               className={`group relative flex gap-3 py-2 ${isMe ? 'justify-end' : 'justify-start'}`}
             >
               {/* Avatar - left side for others */}
@@ -281,24 +296,83 @@ export default function DMChatArea() {
 
               {/* Content */}
               <div className={`relative flex flex-col max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
-                {/* Reply Button (Left side for me) */}
-                {isMe && (
-                  <button 
-                    onClick={() => setReplyingTo(msg)}
-                    className="absolute right-full mr-2 bottom-7 p-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Reply"
+                {/* Action Menu - 点击消息气泡显示，只有有可用操作时才显示 */}
+                {activeMenuMsgId === msg.id && (!msg.recalled || isMe || user?.isAdmin) && (
+                  <div 
+                    className={`absolute ${isMe ? 'right-full mr-2' : 'left-full ml-2'} top-1/2 -translate-y-1/2 z-10`}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Reply size={12} />
-                  </button>
+                    <div className="flex items-center gap-0.5 bg-white dark:bg-zinc-900 rounded-full shadow-lg border border-zinc-200 dark:border-zinc-700 px-1 py-0.5">
+                      {/* 回复 - 只有未撤回的消息可以回复 */}
+                      {!msg.recalled && (
+                        <button 
+                          onClick={() => { setReplyingTo(msg); setActiveMenuMsgId(null); }}
+                          className="p-1.5 rounded-full text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                          title="回复"
+                        >
+                          <Reply size={14} />
+                        </button>
+                      )}
+                      {/* 撤回 - 自己的未撤回消息 */}
+                      {isMe && !msg.recalled && (
+                        <button 
+                          onClick={async () => {
+                            const res = await recallDMMessage(msg.id);
+                            if (!res.success) showAlert(res.error, { variant: 'danger' });
+                            setActiveMenuMsgId(null);
+                          }}
+                          className="p-1.5 rounded-full text-zinc-500 hover:text-amber-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                          title="撤回 (2分钟内)"
+                        >
+                          <Undo2 size={14} />
+                        </button>
+                      )}
+                      {/* 删除 - 自己的已撤回消息 或 管理员任意消息 */}
+                      {((isMe && msg.recalled) || user?.isAdmin) && (
+                        <button 
+                          onClick={async () => {
+                            const confirmed = await showConfirm('确定要删除这条消息吗？', { variant: 'danger' });
+                            if (confirmed) {
+                              const res = await deleteDMMessage(msg.id);
+                              if (!res.success) showAlert(res.error, { variant: 'danger' });
+                            }
+                            setActiveMenuMsgId(null);
+                          }}
+                          className="p-1.5 rounded-full text-zinc-500 hover:text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                          title="删除"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
 
-                <div className={`relative rounded-2xl overflow-hidden ${
-                  msg.imageUrl && !msg.text 
-                    ? '' 
-                    : isMe 
-                      ? 'bg-black dark:bg-white text-white dark:text-black rounded-br-md px-4 py-2.5' 
-                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-bl-md px-4 py-2.5'
-                }`}>
+                {/* Recalled message placeholder */}
+                {msg.recalled ? (
+                  <div 
+                    className={`rounded-2xl px-4 py-2.5 cursor-pointer select-none ${
+                      isMe 
+                        ? 'bg-zinc-200 dark:bg-zinc-800 rounded-br-md' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 rounded-bl-md'
+                    }`}
+                    onClick={(e) => { e.stopPropagation(); setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); }}
+                  >
+                    <span className="text-[13px] text-zinc-400 dark:text-zinc-500 italic">
+                      消息已撤回
+                    </span>
+                  </div>
+                ) : (
+                <div 
+                  className={`relative rounded-2xl overflow-hidden cursor-pointer select-none ${
+                    msg.imageUrl && !msg.text 
+                      ? '' 
+                      : isMe 
+                        ? 'bg-black dark:bg-white text-white dark:text-black rounded-br-md px-4 py-2.5' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-bl-md px-4 py-2.5'
+                  }`}
+                  onClick={(e) => { e.stopPropagation(); setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); }}
+                >
                   {/* Reply Quote Block */}
                   {msg.replyTo && (
                     <div className={`mb-2 pl-2 border-l-2 text-xs ${
@@ -309,9 +383,38 @@ export default function DMChatArea() {
                         <div className={`font-bold ${isMe ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`}>
                           {msg.replyTo.sender}
                         </div>
-                        <div className={`truncate ${isMe ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'}`}>
-                          {msg.replyTo.text}
-                        </div>
+
+                        {/* Replied image thumbnail */}
+                        {msg.replyTo.imageUrl && !expiredImages.has(msg.replyTo.imageUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const imageMessages = dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl));
+                              const index = imageMessages.findIndex(m => m.imageUrl === msg.replyTo.imageUrl);
+                              setLightboxIndex(index >= 0 ? index : 0);
+                              setLightboxOpen(true);
+                            }}
+                            className="mt-1 inline-block rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800"
+                          >
+                            <img
+                              src={msg.replyTo.imageUrl}
+                              alt="Replied image"
+                              className="max-w-[140px] max-h-[100px] object-contain block"
+                              onError={() => markImageExpired(msg.replyTo.imageUrl)}
+                            />
+                          </button>
+                        )}
+                        {msg.replyTo.imageUrl && expiredImages.has(msg.replyTo.imageUrl) && (
+                          <div className="mt-1 inline-flex items-center justify-center max-w-[140px] h-[72px] rounded-md bg-zinc-100 dark:bg-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 text-center px-2">
+                            图片已过期（超过15天自动清理）
+                          </div>
+                        )}
+
+                        {msg.replyTo.text && (
+                          <div className={`truncate ${isMe ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'} ${msg.replyTo.imageUrl ? 'mt-1' : ''}`}>
+                            {msg.replyTo.text}
+                          </div>
+                        )}
                     </div>
                   )}
 
@@ -345,23 +448,11 @@ export default function DMChatArea() {
                     </p>
                   )}
                 </div>
+                )}
                 <span className={`text-[11px] text-zinc-400 dark:text-zinc-600 mt-1 block ${isMe ? 'text-right' : 'text-left'}`}>
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-
-              {/* Reply Button (Right side for others) */}
-              {!isMe && (
-                 <div className="flex items-end opacity-0 group-hover:opacity-100 transition-opacity pb-6">
-                    <button 
-                        onClick={() => setReplyingTo(msg)}
-                        className="p-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
-                        title="Reply"
-                    >
-                        <Reply size={12} />
-                    </button>
-                 </div>
-              )}
 
               {/* Avatar - right side for me */}
               {isMe && (
@@ -371,7 +462,7 @@ export default function DMChatArea() {
                   className="w-10 h-10 rounded-full shrink-0 bg-zinc-200 dark:bg-zinc-700"
                 />
               )}
-            </motion.div>
+            </div>
           );
         })}
         <div ref={messagesEndRef} />
@@ -531,7 +622,7 @@ export default function DMChatArea() {
           open={lightboxOpen}
           close={() => setLightboxOpen(false)}
           index={lightboxIndex}
-          slides={dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }))}
+          slides={lightboxSlides}
           zoom={{
             maxZoomPixelRatio: 5,
             zoomInMultiplier: 2,

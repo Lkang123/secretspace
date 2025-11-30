@@ -275,10 +275,10 @@ export const useChatStore = create((set, get) => ({
       // For now, server sends senderId which is persistentId.
       // Frontend user object should also have persistentId.
       
-      // Use a more unique key combining timestamp and random string
+      // 保留原始 ID 用于后端操作，添加单独的 key 给 React 渲染
       const uniqueMessage = {
         ...message,
-        id: `${message.id}-${Math.random().toString(36).substr(2, 9)}`
+        _key: `${message.id}-${Math.random().toString(36).substr(2, 9)}`
       };
       
       // Update both current messages and cache, keeping only last MAX_MESSAGES
@@ -306,6 +306,54 @@ export const useChatStore = create((set, get) => ({
         if (currentRoom) {
           newCache[currentRoom.id] = newMessages;
         }
+        return { messages: newMessages, messageCache: newCache };
+      });
+    });
+
+    // 消息撤回事件
+    socket.on('message_recalled', ({ messageId, roomId, recalledBy }) => {
+      const { currentRoom, messageCache } = get();
+      
+      set((state) => {
+        // 更新当前消息列表
+        const newMessages = state.messages.map(msg => 
+          (msg.id === messageId || msg.id?.toString().startsWith(messageId?.toString()))
+            ? { ...msg, recalled: true }
+            : msg
+        );
+        
+        // 更新缓存
+        const newCache = { ...state.messageCache };
+        if (currentRoom && newCache[currentRoom.id]) {
+          newCache[currentRoom.id] = newCache[currentRoom.id].map(msg =>
+            (msg.id === messageId || msg.id?.toString().startsWith(messageId?.toString()))
+              ? { ...msg, recalled: true }
+              : msg
+          );
+        }
+        
+        return { messages: newMessages, messageCache: newCache };
+      });
+    });
+
+    // 消息删除事件
+    socket.on('message_deleted', ({ messageId, roomId }) => {
+      const { currentRoom, messageCache } = get();
+      
+      set((state) => {
+        // 从当前消息列表移除
+        const newMessages = state.messages.filter(msg => 
+          !(msg.id === messageId || msg.id?.toString().startsWith(messageId?.toString()))
+        );
+        
+        // 从缓存移除
+        const newCache = { ...state.messageCache };
+        if (currentRoom && newCache[currentRoom.id]) {
+          newCache[currentRoom.id] = newCache[currentRoom.id].filter(msg =>
+            !(msg.id === messageId || msg.id?.toString().startsWith(messageId?.toString()))
+          );
+        }
+        
         return { messages: newMessages, messageCache: newCache };
       });
     });
@@ -424,6 +472,30 @@ export const useChatStore = create((set, get) => ({
         
         return { dmList: newDmList, dmUnreadTotal };
       });
+    });
+
+    // 私聊消息撤回事件
+    socket.on('dm_message_recalled', ({ messageId, conversationId, recalledBy }) => {
+      const { currentDM } = get();
+      
+      if (currentDM && currentDM.id === conversationId) {
+        set((state) => ({
+          dmMessages: state.dmMessages.map(msg =>
+            msg.id === messageId ? { ...msg, recalled: true } : msg
+          )
+        }));
+      }
+    });
+
+    // 私聊消息删除事件
+    socket.on('dm_message_deleted', ({ messageId, conversationId }) => {
+      const { currentDM } = get();
+      
+      if (currentDM && currentDM.id === conversationId) {
+        set((state) => ({
+          dmMessages: state.dmMessages.filter(msg => msg.id !== messageId)
+        }));
+      }
     });
 
     // Initial fetch
@@ -551,28 +623,33 @@ export const useChatStore = create((set, get) => ({
         }));
       }
       
-      socket.emit('join_room', roomId, ({ success, room, history, banner, error, cooldown, remainingSeconds, roomName }) => {
+      socket.emit('join_room', roomId, ({ success, room, history, banner, userAvatars: serverAvatars, error, cooldown, remainingSeconds, roomName }) => {
         if (success) {
           // Save last room for auto-rejoin
           localStorage.setItem('last_room_id', roomId);
           
-          // Restore messages from cache if available, otherwise use history
-          const cachedMessages = get().messageCache[roomId];
+          // 始终使用服务端返回的历史消息（最新的），不再依赖本地缓存
+          // 因为用户不在房间时可能有新消息，缓存会过期
           
           // Reset unread count for this room
           const updatedRooms = get().rooms.map(r => 
             r.id === roomId ? { ...r, unreadCount: 0 } : r
           );
           
-          const baseMessages = cachedMessages || history || [];
-          const limitedMessages = baseMessages.slice(-MAX_MESSAGES);
+          const limitedMessages = (history || []).slice(-MAX_MESSAGES);
+
+          // 合并服务端返回的用户头像映射
+          const mergedAvatars = serverAvatars 
+            ? { ...get().userAvatars, ...serverAvatars }
+            : get().userAvatars;
 
           set({ 
             currentRoom: room, 
             messages: limitedMessages,
             roomBanner: banner || null,
             hasJoined: true,
-            rooms: updatedRooms
+            rooms: updatedRooms,
+            userAvatars: mergedAvatars
           });
           resolve({ success: true });
         } else {
@@ -585,8 +662,8 @@ export const useChatStore = create((set, get) => ({
                    }
                });
            } else {
-               // Only alert if not cooldown (handled by modal)
-               if (error) alert(error);
+               // Only show error if not cooldown (handled by modal)
+               if (error) toast.error(error);
                
                // If room not found, clear storage
                if (error === 'Room not found') {
@@ -626,7 +703,8 @@ export const useChatStore = create((set, get) => ({
     const replyData = replyingTo ? {
         id: replyingTo.id,
         text: replyingTo.text,
-        sender: replyingTo.sender
+        sender: replyingTo.sender,
+        imageUrl: replyingTo.imageUrl || null
     } : null;
 
     socket.emit('send_message', { 
@@ -669,6 +747,34 @@ export const useChatStore = create((set, get) => ({
       }
       
       socket.emit('clear_room_banner', { roomId: currentRoom.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  // 撤回消息（房间）
+  recallMessage: (messageId) => {
+    return new Promise((resolve) => {
+      const { currentRoom } = get();
+      if (!currentRoom) {
+        return resolve({ success: false, error: '未在房间中' });
+      }
+      
+      socket.emit('recall_message', { messageId, roomId: currentRoom.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  // 删除消息（房间，管理员可删除任何消息，普通用户可删除自己的已撤回消息）
+  deleteMessage: (messageId) => {
+    return new Promise((resolve) => {
+      const { currentRoom } = get();
+      if (!currentRoom) {
+        return resolve({ success: false, error: '未在房间中' });
+      }
+      
+      socket.emit('delete_message', { messageId, roomId: currentRoom.id }, (response) => {
         resolve(response || { success: true });
       });
     });
@@ -848,7 +954,8 @@ export const useChatStore = create((set, get) => ({
     const replyData = replyingTo ? {
       id: replyingTo.id,
       text: replyingTo.text,
-      sender: replyingTo.sender
+      sender: replyingTo.sender,
+      imageUrl: replyingTo.imageUrl || null
     } : null;
 
     socket.emit('send_dm', {
@@ -864,6 +971,34 @@ export const useChatStore = create((set, get) => ({
   // 关闭私聊会话
   closeDM: () => {
     set({ currentDM: null, dmMessages: [], showDMPanel: false });
+  },
+
+  // 撤回私聊消息
+  recallDMMessage: (messageId) => {
+    return new Promise((resolve) => {
+      const { currentDM } = get();
+      if (!currentDM) {
+        return resolve({ success: false, error: '未在会话中' });
+      }
+      
+      socket.emit('recall_dm_message', { messageId, conversationId: currentDM.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  // 删除私聊消息（管理员可删除任何消息，普通用户可删除自己的已撤回消息）
+  deleteDMMessage: (messageId) => {
+    return new Promise((resolve) => {
+      const { currentDM } = get();
+      if (!currentDM) {
+        return resolve({ success: false, error: '未在会话中' });
+      }
+      
+      socket.emit('delete_dm_message', { messageId, conversationId: currentDM.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
   },
 
   // ======= 图片上传相关方法 =======

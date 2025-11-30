@@ -6,6 +6,7 @@ import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import DMChatArea from './components/DMChatArea';
+import DialogContainer, { showConfirm, showAlert } from './components/Dialog';
 import { AlertTriangle, CheckCircle, X, Shield, Trash2, Users, Edit2, Key, LogIn, UserX, Crown } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -84,11 +85,11 @@ function App() {
           const users = await fetchAdminUsers();
           setAdminUsers(users || []);
       } else {
-          alert(result.error || 'Update failed');
+          showAlert(result.error || '更新失败', { variant: 'danger' });
       }
     } catch (err) {
       console.error('Update user error:', err);
-      alert('Update failed');
+      showAlert('更新失败', { variant: 'danger' });
     }
   };
 
@@ -1007,6 +1008,9 @@ function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      
+      {/* 全局弹窗容器 */}
+      <DialogContainer />
     </>
   );
 }
