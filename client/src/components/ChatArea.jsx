@@ -97,30 +97,20 @@ export default function ChatArea() {
   }, [messages, expiredImages]);
 
   useLayoutEffect(() => {
-    // 1. 检查房间是否切换
+    // 检查房间是否切换
     if (currentRoom?.id !== prevRoomIdRef.current) {
         prevRoomIdRef.current = currentRoom?.id;
         isSwitchingRoom.current = true;
-        setIsRoomLoaded(false); // 隐藏旧内容
-        return; // 等待下一次渲染（新内容到来）
     }
 
-    // 2. 滚动逻辑
+    // 滚动逻辑
     if (messages.length > 0) {
-      if (isSwitchingRoom.current) {
-        scrollToBottom('auto');
-        requestAnimationFrame(() => {
-            setIsRoomLoaded(true);
-            isSwitchingRoom.current = false;
-        });
-      } else {
-        scrollToBottom('smooth');
-      }
-    } else {
-        // 空房间或者刚加载完
-        setIsRoomLoaded(true);
-        isSwitchingRoom.current = false;
+      scrollToBottom(isSwitchingRoom.current ? 'auto' : 'smooth');
+      isSwitchingRoom.current = false;
     }
+    
+    // 确保内容可见
+    setIsRoomLoaded(true);
   }, [messages, currentRoom?.id]);
 
   // Fallback delay scroll for image loading etc

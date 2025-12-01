@@ -95,24 +95,14 @@ export default function DMChatArea() {
     if (currentDM?.id !== prevRoomIdRef.current) {
         prevRoomIdRef.current = currentDM?.id;
         isSwitchingRoom.current = true;
-        setIsRoomLoaded(false);
-        return;
     }
 
     if (dmMessages.length > 0) {
-      if (isSwitchingRoom.current) {
-        scrollToBottom('auto');
-        requestAnimationFrame(() => {
-            setIsRoomLoaded(true);
-            isSwitchingRoom.current = false;
-        });
-      } else {
-        scrollToBottom('smooth');
-      }
-    } else {
-        setIsRoomLoaded(true);
-        isSwitchingRoom.current = false;
+      scrollToBottom(isSwitchingRoom.current ? 'auto' : 'smooth');
+      isSwitchingRoom.current = false;
     }
+    
+    setIsRoomLoaded(true);
   }, [dmMessages, currentDM?.id]);
 
   // Clear unread when viewing
