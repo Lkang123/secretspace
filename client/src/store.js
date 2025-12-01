@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
+import { playNotificationSound, updateTitleNotification } from './utils';
 
 const MAX_MESSAGES = 300;
 
@@ -53,6 +54,9 @@ export const useChatStore = create((set, get) => ({
   dmMessages: [], // 当前私聊消息
   dmUnreadTotal: 0, // 私聊未读总数
   showDMPanel: false, // 是否显示私聊面板
+  
+  // 全局通知状态
+  globalUnreadCount: 0,
   
   // 图片上传相关状态
   uploadingImage: false, // 是否正在上传图片
@@ -116,11 +120,23 @@ export const useChatStore = create((set, get) => ({
     socket.emit('mark_dm_read', conversationId);
   },
 
+  resetGlobalUnread: () => {
+    set({ globalUnreadCount: 0 });
+    updateTitleNotification(0);
+  },
+
   // Actions
   initSocket: () => {
     // Prevent duplicate initialization (React StrictMode calls useEffect twice)
     if (isInitialized) return;
     isInitialized = true;
+
+    // 监听可见性变化，清除标题通知
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        get().resetGlobalUnread();
+      }
+    });
 
     socket.on('connect', () => {
       set({ connected: true });
@@ -210,6 +226,15 @@ export const useChatStore = create((set, get) => ({
 
     // Listen for room notifications (new messages when outside)
     socket.on('room_notification', ({ roomId }) => {
+        const { globalUnreadCount } = get();
+        playNotificationSound();
+        
+        if (document.hidden) {
+            const newCount = globalUnreadCount + 1;
+            set({ globalUnreadCount: newCount });
+            updateTitleNotification(newCount);
+        }
+
         set((state) => {
             const newRooms = state.rooms.map(room => {
                 if (room.id === roomId) {
@@ -269,11 +294,21 @@ export const useChatStore = create((set, get) => ({
     });
     
     socket.on('receive_message', (message) => {
-      const { currentRoom, messageCache, user } = get();
+      const { currentRoom, messageCache, user, globalUnreadCount } = get();
       // Determine if message is from self using persistent ID
       // We might need to update how we display messages in ChatArea too if we change senderId logic
       // For now, server sends senderId which is persistentId.
       // Frontend user object should also have persistentId.
+      
+      // 检查是否需要通知 (非自己发送的消息)
+      if (message.senderId !== user?.id) {
+        if (document.hidden) {
+           const newCount = globalUnreadCount + 1;
+           set({ globalUnreadCount: newCount });
+           updateTitleNotification(newCount);
+           playNotificationSound();
+        }
+      }
       
 // 保留原始 ID 用于后端操作，添加单独的 key 给 React 渲染
       const uniqueMessage = {
@@ -416,8 +451,18 @@ export const useChatStore = create((set, get) => ({
     
     // 接收私聊消息
     socket.on('receive_dm', ({ conversationId, message }) => {
-      const { currentDM } = get();
+      const { currentDM, user, globalUnreadCount } = get();
       
+      // 检查是否需要通知
+      if (message.senderId !== user?.id) {
+        if (document.hidden) {
+           const newCount = globalUnreadCount + 1;
+           set({ globalUnreadCount: newCount });
+           updateTitleNotification(newCount);
+           playNotificationSound();
+        }
+      }
+
       // 如果是当前打开的会话，添加到消息列表
       if (currentDM && currentDM.id === conversationId) {
         set((state) => {
@@ -435,22 +480,43 @@ export const useChatStore = create((set, get) => ({
 
     // 私聊通知（更新未读数）
     socket.on('dm_notification', ({ conversationId, lastMessage, timestamp }) => {
-      const { currentDM, dmList, fetchDMList } = get();
+      const { currentDM, dmList, fetchDMList, showDMPanel, globalUnreadCount } = get();
       
       // 检查是否是新会话
       const exists = dmList.some(conv => conv.id === conversationId);
       if (!exists) {
         fetchDMList();
+        // 新会话通知
+        playNotificationSound();
+        if (document.hidden) {
+            const newCount = globalUnreadCount + 1;
+            set({ globalUnreadCount: newCount });
+            updateTitleNotification(newCount);
+        }
         return;
+      }
+      
+      // Check if viewing
+      const isViewing = currentDM && String(currentDM.id) === String(conversationId) && showDMPanel;
+      
+      if (!isViewing) {
+          playNotificationSound();
+          if (document.hidden) {
+              const newCount = globalUnreadCount + 1;
+              set({ globalUnreadCount: newCount });
+              updateTitleNotification(newCount);
+          }
       }
       
       set((state) => {
         // 准确判断是否是当前正在查看的会话
         // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的
         // 使用 String() 确保 ID 类型一致
-        const isViewing = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel;
+        // const isViewing = ... (already calculated above, but we need it inside set for consistency with state updates if race conditions)
+        // Let's use the one from state to be safe inside reducer
+        const isViewingInner = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel;
         
-        if (isViewing) {
+        if (isViewingInner) {
             // 如果正在查看，通知后端已读
             socket.emit('mark_dm_read', conversationId);
         }
@@ -461,7 +527,7 @@ export const useChatStore = create((set, get) => ({
               ...conv,
               lastMessage,
               lastMessageAt: timestamp,
-              unreadCount: isViewing ? 0 : (conv.unreadCount || 0) + 1
+              unreadCount: isViewingInner ? 0 : (conv.unreadCount || 0) + 1
             };
           }
           return conv;

@@ -1,37 +1,71 @@
 #!/bin/bash
+set -e
 
-# SecretSpace 部署脚本
-# 在 Linux 服务器上运行
+# 配置
+REPO_URL="https://github.com/Lkang123/secretspace.git"
+APP_DIR="/var/www/secretspace"
 
-echo "=== SecretSpace 部署开始 ==="
+echo "=== SecretSpace 自动部署脚本 ==="
 
-# 1. 更新系统
-echo ">>> 更新系统..."
-apt update && apt upgrade -y
+# 1. 环境检查与安装 (Ubuntu/Debian)
+echo ">>> 检查环境..."
+if ! command -v node &> /dev/null; then
+    echo "    安装 Node.js 20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
+fi
 
-# 2. 安装 Node.js 18
-echo ">>> 安装 Node.js..."
-curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-apt install -y nodejs
+if ! command -v pm2 &> /dev/null; then
+    echo "    安装 PM2..."
+    npm install -g pm2
+fi
 
-# 3. 安装 Git
-echo ">>> 安装 Git..."
-apt install -y git
+if ! command -v git &> /dev/null; then
+    echo "    安装 Git..."
+    apt-get install -y git
+fi
 
-# 4. 安装 PM2（进程管理器）
-echo ">>> 安装 PM2..."
-npm install -g pm2
+# 2. 代码部署/更新
+if [ -d "$APP_DIR" ]; then
+    echo ">>> 目录已存在，执行更新..."
+    cd "$APP_DIR"
+    # 防止 git lock 问题
+    rm -f .git/index.lock
+    git fetch --all
+    git reset --hard origin/main
+else
+    echo ">>> 目录不存在，执行克隆..."
+    mkdir -p /var/www
+    git clone "$REPO_URL" "$APP_DIR"
+    cd "$APP_DIR"
+fi
 
-# 5. 创建应用目录
-echo ">>> 创建应用目录..."
-mkdir -p /var/www/secretspace
-cd /var/www/secretspace
+# 3. 安装依赖与构建
+echo ">>> 安装后端依赖..."
+npm install --no-audit
 
-# 6. 提示用户上传代码
+echo ">>> 构建前端..."
+cd client
+# 设置 npm 镜像防止连接超时 (可选)
+# npm config set registry https://registry.npmmirror.com
+npm install --no-audit
+npm run build
+cd ..
+
+# 4. PM2 管理
+echo ">>> 管理进程..."
+if pm2 list | grep -q "secretspace"; then
+    echo "    重启服务..."
+    pm2 restart secretspace
+else
+    echo "    启动服务..."
+    pm2 start server.js --name secretspace
+fi
+
+# 保存 PM2 状态以支持开机自启
+pm2 save
+# pm2 startup (通常只需运行一次，此处省略避免重复输出)
+
 echo ""
-echo "=== 请上传代码到 /var/www/secretspace ==="
-echo "可以使用以下方式："
-echo "1. git clone <你的仓库地址>"
-echo "2. 使用 FileZilla/WinSCP 上传文件"
-echo ""
-echo "上传完成后运行: bash /var/www/secretspace/start.sh"
+echo "=== 部署成功! ==="
+echo "服务运行在: http://$(curl -s ifconfig.me):3001"

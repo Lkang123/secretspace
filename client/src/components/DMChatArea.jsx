@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, Suspense, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, Suspense, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'yet-another-react-lightbox/styles.css';
 import { useChatStore } from '../store';
@@ -40,9 +40,19 @@ export default function DMChatArea() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [expiredImages, setExpiredImages] = useState(() => new Set());
   const [activeMenuMsgId, setActiveMenuMsgId] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const isSwitchingRoom = useRef(false);
+  const [isRoomLoaded, setIsRoomLoaded] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // 点击外部关闭消息菜单
   useEffect(() => {
@@ -52,8 +62,8 @@ export default function DMChatArea() {
     return () => document.removeEventListener('click', handleClick);
   }, [activeMenuMsgId]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   const markImageExpired = useCallback((url) => {
@@ -72,16 +82,41 @@ export default function DMChatArea() {
   }, [dmMessages, expiredImages]);
 
   useEffect(() => {
-    scrollToBottom();
-    // 延迟滚动，防止图片加载导致高度变化
-    const timer = setTimeout(scrollToBottom, 100);
-    
-    // 如果有新消息且当前正在查看该会话，清除未读
-    if (currentDM) {
+    // Scroll logic handled by useLayoutEffect now
+    // Only handle delayed scroll for safety/images
+    if (dmMessages.length > 0 && !isSwitchingRoom.current) {
+        const timer = setTimeout(() => scrollToBottom('smooth'), 100);
+        return () => clearTimeout(timer);
+    }
+  }, [dmMessages]);
+
+  // Track DM switching
+  useEffect(() => {
+    isSwitchingRoom.current = true;
+    setIsRoomLoaded(false);
+  }, [currentDM?.id]);
+
+  useLayoutEffect(() => {
+    if (dmMessages.length > 0) {
+      if (isSwitchingRoom.current) {
+        scrollToBottom('auto');
+        requestAnimationFrame(() => {
+            setIsRoomLoaded(true);
+            isSwitchingRoom.current = false;
+        });
+      } else {
+        scrollToBottom('smooth');
+      }
+    } else {
+        setIsRoomLoaded(true);
+    }
+  }, [dmMessages]);
+
+  // Clear unread when viewing
+  useEffect(() => {
+    if (currentDM && dmMessages.length > 0) {
       clearDMUnread(currentDM.id);
     }
-    
-    return () => clearTimeout(timer);
   }, [dmMessages, currentDM, clearDMUnread]);
 
   useEffect(() => {
@@ -276,7 +311,7 @@ export default function DMChatArea() {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto pb-20 px-4 space-y-1 scroll-smooth pt-16">
+      <div className={`flex-1 overflow-y-auto pb-20 px-4 space-y-1 pt-16 ${!isRoomLoaded ? 'opacity-0' : 'opacity-100'} transition-opacity duration-150`}>
         {dmMessages.map((msg, i) => {
           const isMe = msg.senderId === user.id;
 
@@ -356,7 +391,17 @@ export default function DMChatArea() {
                         ? 'bg-zinc-200 dark:bg-zinc-800 rounded-br-md' 
                         : 'bg-zinc-100 dark:bg-zinc-800 rounded-bl-md'
                     }`}
-                    onClick={(e) => { e.stopPropagation(); setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); }}
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      if (isMobile) {
+                        setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); 
+                      }
+                    }}
+                    onContextMenu={(e) => { 
+                      e.preventDefault(); 
+                      e.stopPropagation(); 
+                      setActiveMenuMsgId(msg.id); 
+                    }}
                   >
                     <span className="text-[13px] text-zinc-400 dark:text-zinc-500 italic">
                       消息已撤回
@@ -371,16 +416,26 @@ export default function DMChatArea() {
                         ? 'bg-black dark:bg-white text-white dark:text-black rounded-br-md px-4 py-2.5' 
                         : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-bl-md px-4 py-2.5'
                   }`}
-                  onClick={(e) => { e.stopPropagation(); setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); }}
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (isMobile) {
+                      setActiveMenuMsgId(activeMenuMsgId === msg.id ? null : msg.id); 
+                    }
+                  }}
+                  onContextMenu={(e) => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    setActiveMenuMsgId(msg.id); 
+                  }}
                 >
                   {/* Reply Quote Block */}
                   {msg.replyTo && (
-                    <div className={`mb-2 pl-2 border-l-2 text-xs ${
+                    <div className={`mb-2 pl-3 py-2 border-l-4 rounded-r-md text-xs ${
                         isMe 
-                        ? 'border-zinc-500' 
-                        : 'border-zinc-400 dark:border-zinc-500'
+                        ? 'border-zinc-500 bg-zinc-800/50 dark:bg-zinc-100/10' 
+                        : 'border-zinc-400 dark:border-zinc-500 bg-white/50 dark:bg-black/20'
                     }`}>
-                        <div className={`font-bold ${isMe ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                        <div className={`font-bold mb-0.5 ${isMe ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300'}`}>
                           {msg.replyTo.sender}
                         </div>
 
@@ -394,24 +449,24 @@ export default function DMChatArea() {
                               setLightboxIndex(index >= 0 ? index : 0);
                               setLightboxOpen(true);
                             }}
-                            className="mt-1 inline-block rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800"
+                            className="mt-1 mb-1 inline-block rounded-md overflow-hidden bg-black/20 dark:bg-black/10"
                           >
                             <img
                               src={msg.replyTo.imageUrl}
                               alt="Replied image"
-                              className="max-w-[140px] max-h-[100px] object-contain block"
+                              className="max-w-[120px] max-h-[80px] object-contain block"
                               onError={() => markImageExpired(msg.replyTo.imageUrl)}
                             />
                           </button>
                         )}
                         {msg.replyTo.imageUrl && expiredImages.has(msg.replyTo.imageUrl) && (
-                          <div className="mt-1 inline-flex items-center justify-center max-w-[140px] h-[72px] rounded-md bg-zinc-100 dark:bg-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 text-center px-2">
-                            图片已过期（超过15天自动清理）
+                          <div className="mt-1 mb-1 inline-flex items-center justify-center max-w-[120px] h-[60px] rounded-md bg-black/10 dark:bg-black/10 text-[10px] text-zinc-400 dark:text-zinc-500 text-center px-2">
+                            图片已过期
                           </div>
                         )}
 
                         {msg.replyTo.text && (
-                          <div className={`truncate ${isMe ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'} ${msg.replyTo.imageUrl ? 'mt-1' : ''}`}>
+                          <div className={`truncate ${isMe ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-600 dark:text-zinc-400'}`}>
                             {msg.replyTo.text}
                           </div>
                         )}
