@@ -47,6 +47,7 @@ export default function ChatArea() {
   const [activeMenuMsgId, setActiveMenuMsgId] = useState(null); // 当前显示菜单的消息ID
   const [isMobile, setIsMobile] = useState(false); // Mobile detection state
   const isSwitchingRoom = useRef(false); // Track room switching for scroll behavior
+  const prevRoomIdRef = useRef(currentRoom?.id);
   const [isRoomLoaded, setIsRoomLoaded] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -95,13 +96,16 @@ export default function ChatArea() {
     return messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [messages, expiredImages]);
 
-  // Track room switching
-  useEffect(() => {
-    isSwitchingRoom.current = true;
-    setIsRoomLoaded(false);
-  }, [currentRoom?.id]);
-
   useLayoutEffect(() => {
+    // 1. 检查房间是否切换
+    if (currentRoom?.id !== prevRoomIdRef.current) {
+        prevRoomIdRef.current = currentRoom?.id;
+        isSwitchingRoom.current = true;
+        setIsRoomLoaded(false); // 隐藏旧内容
+        return; // 等待下一次渲染（新内容到来）
+    }
+
+    // 2. 滚动逻辑
     if (messages.length > 0) {
       if (isSwitchingRoom.current) {
         scrollToBottom('auto');
@@ -113,9 +117,11 @@ export default function ChatArea() {
         scrollToBottom('smooth');
       }
     } else {
+        // 空房间或者刚加载完
         setIsRoomLoaded(true);
+        isSwitchingRoom.current = false;
     }
-  }, [messages]);
+  }, [messages, currentRoom?.id]);
 
   // Fallback delay scroll for image loading etc
   useEffect(() => {

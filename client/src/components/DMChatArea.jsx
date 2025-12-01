@@ -42,6 +42,7 @@ export default function DMChatArea() {
   const [activeMenuMsgId, setActiveMenuMsgId] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const isSwitchingRoom = useRef(false);
+  const prevRoomIdRef = useRef(currentDM?.id);
   const [isRoomLoaded, setIsRoomLoaded] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -90,13 +91,14 @@ export default function DMChatArea() {
     }
   }, [dmMessages]);
 
-  // Track DM switching
-  useEffect(() => {
-    isSwitchingRoom.current = true;
-    setIsRoomLoaded(false);
-  }, [currentDM?.id]);
-
   useLayoutEffect(() => {
+    if (currentDM?.id !== prevRoomIdRef.current) {
+        prevRoomIdRef.current = currentDM?.id;
+        isSwitchingRoom.current = true;
+        setIsRoomLoaded(false);
+        return;
+    }
+
     if (dmMessages.length > 0) {
       if (isSwitchingRoom.current) {
         scrollToBottom('auto');
@@ -109,8 +111,9 @@ export default function DMChatArea() {
       }
     } else {
         setIsRoomLoaded(true);
+        isSwitchingRoom.current = false;
     }
-  }, [dmMessages]);
+  }, [dmMessages, currentDM?.id]);
 
   // Clear unread when viewing
   useEffect(() => {
