@@ -1020,10 +1020,11 @@ export const useChatStore = create((set, get) => ({
         get().leaveRoom();
       }
 
-      // 立即设置 DM 面板显示和当前会话，避免闪烁
+      // 立即设置 DM 面板显示和当前会话，清空旧消息
       set({
         currentDM: conversation,
-        showDMPanel: true
+        showDMPanel: true,
+        dmMessages: []  // 清空旧消息，避免显示上一个对话的内容
       });
 
       socket.emit('enter_dm', conversation.id, (response) => {
