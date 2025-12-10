@@ -72,19 +72,37 @@ export default function DMChatArea() {
     return dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [dmMessages, expiredImages]);
 
-  // 消息变化时滚动到底部
+  // 记录上一次消息数量，用于判断是否有新消息
+  const prevMsgCountRef = useRef(0);
+  
+  // 切换对话时重置计数
   useEffect(() => {
-    scrollToBottom();
-    // 延迟滚动，处理图片加载导致的高度变化
-    const timer = setTimeout(scrollToBottom, 100);
+    prevMsgCountRef.current = 0;
+  }, [currentDM?.id]);
+  
+  // 只在有新消息时才滚动到底部
+  useEffect(() => {
+    const currentCount = dmMessages.length;
+    const prevCount = prevMsgCountRef.current;
     
-    // 如果有新消息且当前正在查看该会话，清除未读
+    // 只有消息数量增加（新消息）或首次加载时才滚动
+    if (currentCount > prevCount || prevCount === 0) {
+      scrollToBottom();
+      // 延迟滚动，处理图片加载
+      const timer = setTimeout(scrollToBottom, 100);
+      prevMsgCountRef.current = currentCount;
+      return () => clearTimeout(timer);
+    }
+    
+    prevMsgCountRef.current = currentCount;
+  }, [dmMessages.length, scrollToBottom]);
+  
+  // 清除未读（独立的 effect）
+  useEffect(() => {
     if (currentDM) {
       clearDMUnread(currentDM.id);
     }
-    
-    return () => clearTimeout(timer);
-  }, [dmMessages, currentDM, clearDMUnread, scrollToBottom]);
+  }, [currentDM?.id, clearDMUnread]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
