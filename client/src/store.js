@@ -1006,12 +1006,16 @@ export const useChatStore = create((set, get) => ({
         get().leaveRoom();
       }
 
+      // 立即设置 DM 面板显示和当前会话，避免闪烁
+      set({
+        currentDM: conversation,
+        showDMPanel: true
+      });
+
       socket.emit('enter_dm', conversation.id, (response) => {
         if (response.success) {
           set({
-            currentDM: conversation,
-            dmMessages: response.history || [],
-            showDMPanel: true
+            dmMessages: response.history || []
           });
           
           // 更新列表中的未读数
