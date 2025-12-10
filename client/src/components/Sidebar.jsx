@@ -396,56 +396,53 @@ export default function Sidebar() {
               dmList.map((conv) => {
                 const isActive = currentDM?.id === conv.id && showDMPanel;
                 return (
-                  <div key={conv.id} className="group relative">
+                  <div key={conv.id} className="group relative flex items-center">
                     <button
                       onClick={() => enterDM(conv)}
                       className={clsx(
-                        "w-full h-14 flex items-center gap-3 px-3 rounded-xl transition-colors",
+                        "group/btn flex-1 h-12 flex items-center justify-between px-3 rounded-full transition-all duration-200 backdrop-blur-md relative overflow-hidden",
                         isActive 
-                          ? "bg-zinc-100 dark:bg-zinc-800 shadow-sm" 
-                          : "hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
+                          ? "bg-zinc-100/70 dark:bg-zinc-800/70 text-zinc-900 dark:text-white font-bold shadow-sm" 
+                          : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50"
                       )}
                     >
-                      <img
-                        src={getPresetAvatarUrl(null, conv.otherUser?.name)}
-                        alt={conv.otherUser?.name}
-                        className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-700"
-                      />
-                      <div className="flex-1 min-w-0 text-left">
-                        <div className="flex items-center justify-between">
-                          <span className={clsx(
-                            "text-[14px] font-medium truncate",
-                            isActive ? "text-zinc-900 dark:text-white font-bold" : "text-zinc-900 dark:text-white"
-                          )}>
-                            {conv.otherUser?.name}
+                      {/* Left: Avatar + Name + Last Message */}
+                      <div className="flex items-center gap-3 overflow-hidden flex-1">
+                        <img
+                          src={getPresetAvatarUrl(null, conv.otherUser?.name)}
+                          alt={conv.otherUser?.name}
+                          className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 shrink-0"
+                        />
+                        <div className="flex flex-col overflow-hidden items-start">
+                          <span className="truncate text-[14px] font-medium leading-tight">{conv.otherUser?.name}</span>
+                          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate max-w-[120px]">
+                            {conv.lastMessage || 'No messages yet'}
                           </span>
-                          {conv.unreadCount > 0 && (
-                            <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-red-500 text-white">
-                              {conv.unreadCount}
-                            </span>
-                          )}
                         </div>
-                        <p className={clsx(
-                          "text-[12px] truncate",
-                          isActive ? "text-zinc-600 dark:text-zinc-300" : "text-zinc-500"
-                        )}>
-                          {conv.lastMessage || 'No messages yet'}
-                        </p>
                       </div>
-                    </button>
-                    {/* 删除按钮 - hover 显示 */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteDMModal({ open: true, convId: conv.id, userName: conv.otherUser?.name });
-                      }}
-                      className={clsx(
-                        "absolute top-1/2 -translate-y-1/2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all",
-                        conv.unreadCount > 0 ? "right-10" : "right-2"
-                      )}
-                      title="删除会话"
-                    >
-                      <Trash2 size={14} />
+
+                      {/* Right: Badges + Actions */}
+                      <div className="flex items-center gap-1 pl-2 shrink-0">
+                        {/* Unread Count */}
+                        {conv.unreadCount > 0 && (
+                          <span className="min-w-[20px] h-5 px-1.5 flex items-center justify-center text-[11px] font-bold rounded-full bg-red-500 text-white shadow-sm">
+                            {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
+                          </span>
+                        )}
+
+                        {/* Delete Button (Hover only) */}
+                        <div
+                          role="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteDMModal({ open: true, convId: conv.id, userName: conv.otherUser?.name });
+                          }}
+                          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 -mr-1"
+                          title="删除会话"
+                        >
+                          <Trash2 size={14} />
+                        </div>
+                      </div>
                     </button>
                   </div>
                 );
