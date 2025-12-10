@@ -58,3 +58,51 @@ export function getPresetAvatarUrl(avatarId, fallbackName) {
   }
   return getAvatarUrl(fallbackName);
 }
+
+// Play a subtle notification sound using Web Audio API
+export function playNotificationSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    // A pleasant "ding" sound
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1); // Drop to A4
+    
+    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {
+    console.error('Audio play failed', e);
+  }
+}
+
+// Update document title with notification count
+let originalTitle = "SecretSpace";
+
+export function updateTitleNotification(count) {
+  if (count > 0) {
+    document.title = `(${count}) ${originalTitle}`;
+  } else {
+    document.title = originalTitle;
+  }
+  
+  // Also try to update PWA badge if supported
+  if ('setAppBadge' in navigator) {
+    if (count > 0) {
+      navigator.setAppBadge(count).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }
+}
