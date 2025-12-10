@@ -131,10 +131,28 @@ export const useChatStore = create((set, get) => ({
     if (isInitialized) return;
     isInitialized = true;
 
-    // 监听可见性变化，清除标题通知
+    // 监听可见性变化
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
+        // 清除标题通知
         get().resetGlobalUnread();
+        
+        // 检测连接状态，如果断开则强制重连
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          // 即使看起来已连接，也发送一个 ping 检测真实连接状态
+          // 如果 5 秒内没收到响应，强制重连
+          const pingTimeout = setTimeout(() => {
+            if (!socket.connected) return;
+            socket.disconnect();
+            socket.connect();
+          }, 5000);
+          
+          socket.emit('ping', () => {
+            clearTimeout(pingTimeout);
+          });
+        }
       }
     });
 
@@ -155,7 +173,16 @@ export const useChatStore = create((set, get) => ({
                 if (lastRoomId) {
                     get().joinRoom(lastRoomId);
                 }
+            } else {
+                // Login failed, clear invalid session
+                localStorage.removeItem('chat_session');
+                localStorage.removeItem('last_room_id');
             }
+        }).catch(() => {
+            // Error during login, clear session and stop restoring
+            set({ isRestoring: false });
+            localStorage.removeItem('chat_session');
+            localStorage.removeItem('last_room_id');
         });
       } else {
         // No session to restore
@@ -164,7 +191,6 @@ export const useChatStore = create((set, get) => ({
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
       set({ connected: false });
       
       // 如果是服务器主动断开，需要手动重连
@@ -175,7 +201,6 @@ export const useChatStore = create((set, get) => ({
 
     // 重连事件处理
     socket.on('reconnect', (attemptNumber) => {
-      console.log('Socket reconnected after', attemptNumber, 'attempts');
       toast.success('连接已恢复', { duration: 2000 });
       
       // 重连后自动恢复会话
@@ -193,9 +218,7 @@ export const useChatStore = create((set, get) => ({
       }
     });
 
-    socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Reconnection attempt:', attemptNumber);
-    });
+    socket.on('reconnect_attempt', () => {});
 
     socket.on('reconnect_error', (error) => {
       console.error('Reconnection error:', error);
@@ -271,14 +294,9 @@ export const useChatStore = create((set, get) => ({
 
     // Listen for force logout (when admin deletes user)
     socket.on('force_logout', ({ reason }) => {
-      console.log('=== FORCE LOGOUT EVENT RECEIVED ===');
-      console.log('Reason:', reason);
-      console.log('Current user:', get().user);
-      
       // Immediately clear localStorage to prevent auto re-login
       localStorage.removeItem('chat_session');
       localStorage.removeItem('last_room_id');
-      console.log('localStorage cleared');
       
       // Set force logout message to show modal
       set({ 
@@ -288,9 +306,6 @@ export const useChatStore = create((set, get) => ({
         messages: [],
         rooms: [],
       });
-      
-      console.log('forceLogoutMessage set:', { reason: reason || '您已被管理员强制下线' });
-      console.log('=== FORCE LOGOUT HANDLER COMPLETE ===');
     });
     
     socket.on('receive_message', (message) => {
@@ -310,15 +325,9 @@ export const useChatStore = create((set, get) => ({
         }
       }
       
-// 保留原始 ID 用于后端操作，添加单独的 key 给 React 渲染
-      const uniqueMessage = {
-        ...message,
-        _key: `${message.id}-${Math.random().toString(36).substr(2, 9)}`
-      };
-      
-      // Update both current messages and cache, keeping only last MAX_MESSAGES
+// Update both current messages and cache, keeping only last MAX_MESSAGES
       set((state) => {
-        const newMessages = [...state.messages, uniqueMessage].slice(-MAX_MESSAGES);
+        const newMessages = [...state.messages, message].slice(-MAX_MESSAGES);
         const newCache = { ...state.messageCache };
         if (currentRoom) {
           newCache[currentRoom.id] = newMessages;
@@ -395,7 +404,6 @@ export const useChatStore = create((set, get) => ({
 
     // Listen for being kicked from room
     socket.on('kicked_from_room', ({ roomName, reason }) => {
-      console.log('Kicked from room:', roomName, reason);
       // Show notification
       const currentRoom = get().currentRoom;
       if (currentRoom) {

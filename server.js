@@ -816,6 +816,13 @@ io.on('connection', (socket) => {
 
   // --- Events ---
 
+  // Ping/Pong for connection health check
+  socket.on('ping', (callback) => {
+    if (typeof callback === 'function') {
+      callback();
+    }
+  });
+
   // 1. Login / Register
   socket.on('login', ({ username, password }, callback) => {
     // Basic validation

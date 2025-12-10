@@ -155,15 +155,27 @@ function App() {
   const [roomUsersList, setRoomUsersList] = useState([]);
   const [deleteUserConfirm, setDeleteUserConfirm] = useState({ step: 0, user: null }); // 0: closed, 1-2: confirmation steps
   const [kickUserConfirm, setKickUserConfirm] = useState({ open: false, roomId: null, username: null }); // Kick user confirmation
+  const [connectionTimeout, setConnectionTimeout] = useState(false); // 连接超时状态
 
   useEffect(() => {
     initSocket();
   }, [initSocket]);
 
-  // Debug: Monitor forceLogoutMessage changes
+  // 连接超时检测（10秒）
   useEffect(() => {
-    console.log('forceLogoutMessage changed:', forceLogoutMessage);
-  }, [forceLogoutMessage]);
+    if (connected) {
+      setConnectionTimeout(false);
+      return;
+    }
+    
+    const timer = setTimeout(() => {
+      if (!connected) {
+        setConnectionTimeout(true);
+      }
+    }, 10000);
+    
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   // Apply theme class to html element
   useEffect(() => {
@@ -205,11 +217,9 @@ function App() {
     if (!deleteUserConfirm.user) return;
     
     const username = deleteUserConfirm.user.username;
-    console.log('Deleting user:', username);
     
     try {
       const result = await adminDeleteUser(username);
-      console.log('Delete result:', result);
       
       if (result.success) {
         toast.success(`用户 ${username} 已被删除`, {
@@ -218,9 +228,7 @@ function App() {
         setDeleteUserConfirm({ step: 0, user: null });
         
         // Refresh user list
-        console.log('Refreshing user list...');
         const users = await fetchAdminUsers();
-        console.log('Updated user list:', users);
         setAdminUsers(users || []);
       } else {
         console.error('Delete failed:', result.error);
@@ -277,7 +285,6 @@ function App() {
   };
 
   // Render Force Logout Modal at the top level (before user check)
-  console.log('Rendering forceLogoutModal, message:', forceLogoutMessage);
   const forceLogoutModal = (
     <AnimatePresence>
       {forceLogoutMessage && (
@@ -329,11 +336,27 @@ function App() {
       <>
         {forceLogoutModal}
         <div className="min-h-dvh bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center transition-colors duration-300">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {!connected ? 'Connecting...' : 'Restoring session...'}
-            </p>
+          <div className="flex flex-col items-center gap-4">
+            {!connectionTimeout ? (
+              <>
+                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  {!connected ? '连接中...' : '恢复会话...'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  连接超时，请检查网络后重试
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 rounded-full bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600 transition-colors"
+                >
+                  刷新重试
+                </button>
+              </>
+            )}
           </div>
         </div>
       </>

@@ -48,8 +48,6 @@ export default function ChatArea() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const prevMessageCountRef = useRef(0); // 用于判断是新消息还是初次加载
-  const isInitialLoadRef = useRef(true); // 是否首次加载
 
   // Reset banner dismissed state when banner changes
   useEffect(() => {
@@ -67,11 +65,9 @@ export default function ChatArea() {
   // Get real-time room data (for user count)
   const activeRoom = rooms.find(r => r.id === currentRoom?.id) || currentRoom;
 
-  // 智能滚动：首次加载用 auto（立即跳转），新消息用 smooth
-  const scrollToBottom = useCallback((instant = false) => {
-    messagesEndRef.current?.scrollIntoView({ 
-      behavior: instant ? 'auto' : 'smooth' 
-    });
+  // 滚动到底部（始终无动画，确保立即到位）
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, []);
 
   const markImageExpired = useCallback((url) => {
@@ -89,30 +85,11 @@ export default function ChatArea() {
     return messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [messages, expiredImages]);
 
-  // 切换房间时重置初始加载状态
+  // 消息变化时滚动到底部
   useEffect(() => {
-    isInitialLoadRef.current = true;
-    prevMessageCountRef.current = 0;
-  }, [currentRoom?.id]);
-
-  useEffect(() => {
-    const prevCount = prevMessageCountRef.current;
-    const currentCount = messages.length;
-    
-    // 判断是否是首次加载或批量加载（进入房间）
-    const isInitialOrBulkLoad = isInitialLoadRef.current || 
-      (currentCount - prevCount > 1) || 
-      prevCount === 0;
-    
-    // 首次/批量加载用 instant，单条新消息用 smooth
-    scrollToBottom(isInitialOrBulkLoad);
-    
-    // 更新计数
-    prevMessageCountRef.current = currentCount;
-    isInitialLoadRef.current = false;
-    
-    // 延迟滚动，防止图片加载导致高度变化（也用 instant）
-    const timer = setTimeout(() => scrollToBottom(true), 100);
+    scrollToBottom();
+    // 延迟滚动，处理图片加载导致的高度变化
+    const timer = setTimeout(scrollToBottom, 100);
     return () => clearTimeout(timer);
   }, [messages, scrollToBottom]);
 
@@ -152,10 +129,9 @@ export default function ChatArea() {
     setShowEmojiPicker(false);
   };
 
+  // 输入框聚焦时不再自动滚动，由 visualViewport resize 事件处理
   const handleInputFocus = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-    }, 50);
+    // 移除自动滚动，避免聚焦时页面跳动
   };
 
   // Focus input when replying
@@ -426,7 +402,7 @@ export default function ChatArea() {
 
           if (isSystem) {
             return (
-              <div key={msg._key || msg.id || i} className="flex justify-center py-3">
+              <div key={msg.id} className="flex justify-center py-3">
                 <span className="text-[13px] text-zinc-500 dark:text-zinc-600">
                   {msg.text}
                 </span>
@@ -436,7 +412,7 @@ export default function ChatArea() {
 
           return (
             <div
-              key={msg._key || msg.id || i}
+              key={msg.id}
               className={`group relative flex gap-3 py-2 ${isMe ? 'justify-end' : 'justify-start'}`}
             >
               {/* Avatar - left side for others */}
