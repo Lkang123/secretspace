@@ -67,10 +67,10 @@ export default function ChatArea() {
   // Get real-time room data (for user count)
   const activeRoom = rooms.find(r => r.id === currentRoom?.id) || currentRoom;
 
-  // 智能滚动：首次加载用 instant，新消息用 smooth
+  // 智能滚动：首次加载用 auto（立即跳转），新消息用 smooth
   const scrollToBottom = useCallback((instant = false) => {
     messagesEndRef.current?.scrollIntoView({ 
-      behavior: instant ? 'instant' : 'smooth' 
+      behavior: instant ? 'auto' : 'smooth' 
     });
   }, []);
 
