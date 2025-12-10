@@ -52,6 +52,7 @@ export const useChatStore = create((set, get) => ({
   dmList: [], // 私聊会话列表
   currentDM: null, // 当前私聊会话 { id, otherUser }
   dmMessages: [], // 当前私聊消息
+  dmMessageCache: {}, // 各会话消息缓存
   dmUnreadTotal: 0, // 私聊未读总数
   showDMPanel: false, // 是否显示私聊面板
   
@@ -475,7 +476,15 @@ export const useChatStore = create((set, get) => ({
       if (currentDM && currentDM.id === conversationId) {
         set((state) => {
           const newMessages = [...state.dmMessages, message].slice(-MAX_MESSAGES);
-          return { dmMessages: newMessages };
+          const newCache = { ...state.dmMessageCache, [conversationId]: newMessages };
+          return { dmMessages: newMessages, dmMessageCache: newCache };
+        });
+      } else {
+        // 更新缓存中的历史（如果存在）用于快速切换
+        set((state) => {
+          const cached = state.dmMessageCache[conversationId] || [];
+          const newCached = [...cached, message].slice(-MAX_MESSAGES);
+          return { dmMessageCache: { ...state.dmMessageCache, [conversationId]: newCached } };
         });
       }
     });
@@ -1020,17 +1029,19 @@ export const useChatStore = create((set, get) => ({
         get().leaveRoom();
       }
 
-      // 立即设置 DM 面板显示和当前会话，清空旧消息
-      set({
+      // 立即设置 DM 面板显示和当前会话，优先使用缓存
+      set((state) => ({
         currentDM: conversation,
         showDMPanel: true,
-        dmMessages: []  // 清空旧消息，避免显示上一个对话的内容
-      });
+        dmMessages: state.dmMessageCache[conversation.id] || [] // 使用缓存，避免空白
+      }));
 
       socket.emit('enter_dm', conversation.id, (response) => {
         if (response.success) {
-          set({
-            dmMessages: response.history || []
+          set((state) => {
+            const history = response.history || [];
+            const newCache = { ...state.dmMessageCache, [conversation.id]: history };
+            return { dmMessages: history, dmMessageCache: newCache };
           });
           
           // 更新列表中的未读数
