@@ -12,6 +12,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [usernameError, setUsernameError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const validateUsername = (value) => {
     if (!value) {
@@ -112,21 +113,30 @@ export default function Login() {
                 </div>
             </div>
 
-            <div className="relative">
-                <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    className="w-full h-14 px-4 pr-12 text-[17px] rounded-md bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-500 focus:outline-none focus:border-zinc-900 dark:focus:border-white focus:ring-1 focus:ring-zinc-900 dark:focus:ring-white transition-all"
-                />
-                <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
+            <div>
+              <div className="relative">
+                  <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Password"
+                      className="w-full h-14 px-4 pr-12 text-[17px] rounded-md bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-500 focus:outline-none focus:border-zinc-900 dark:focus:border-white focus:ring-1 focus:ring-zinc-900 dark:focus:ring-white transition-all"
+                  />
+                  <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="mt-2 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
+              >
+                忘记密码？
+              </button>
             </div>
 
             <motion.button
@@ -144,6 +154,39 @@ export default function Login() {
             </p>
         </div>
       </motion.div>
+
+      {/* 忘记密码提示弹窗 */}
+      {showForgotPassword && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        >
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowForgotPassword(false)}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="relative w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-hidden"
+          >
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-3">忘记密码</h3>
+              <p className="text-[15px] text-zinc-600 dark:text-zinc-400 leading-relaxed mb-6">
+                请联系管理员重置密码。管理员会在确认身份后帮你重置。
+              </p>
+              <button
+                onClick={() => setShowForgotPassword(false)}
+                className="w-full h-11 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black text-sm font-bold hover:bg-black dark:hover:bg-zinc-200 transition-colors"
+              >
+                知道了
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }

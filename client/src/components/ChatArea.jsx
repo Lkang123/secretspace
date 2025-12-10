@@ -48,6 +48,8 @@ export default function ChatArea() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const prevMessageCountRef = useRef(0); // 用于判断是新消息还是初次加载
+  const isInitialLoadRef = useRef(true); // 是否首次加载
 
   // Reset banner dismissed state when banner changes
   useEffect(() => {
@@ -65,9 +67,12 @@ export default function ChatArea() {
   // Get real-time room data (for user count)
   const activeRoom = rooms.find(r => r.id === currentRoom?.id) || currentRoom;
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // 智能滚动：首次加载用 instant，新消息用 smooth
+  const scrollToBottom = useCallback((instant = false) => {
+    messagesEndRef.current?.scrollIntoView({ 
+      behavior: instant ? 'instant' : 'smooth' 
+    });
+  }, []);
 
   const markImageExpired = useCallback((url) => {
     if (!url) return;
@@ -84,12 +89,32 @@ export default function ChatArea() {
     return messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [messages, expiredImages]);
 
+  // 切换房间时重置初始加载状态
   useEffect(() => {
-    scrollToBottom();
-    // 延迟滚动，防止图片加载导致高度变化
-    const timer = setTimeout(scrollToBottom, 100);
+    isInitialLoadRef.current = true;
+    prevMessageCountRef.current = 0;
+  }, [currentRoom?.id]);
+
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current;
+    const currentCount = messages.length;
+    
+    // 判断是否是首次加载或批量加载（进入房间）
+    const isInitialOrBulkLoad = isInitialLoadRef.current || 
+      (currentCount - prevCount > 1) || 
+      prevCount === 0;
+    
+    // 首次/批量加载用 instant，单条新消息用 smooth
+    scrollToBottom(isInitialOrBulkLoad);
+    
+    // 更新计数
+    prevMessageCountRef.current = currentCount;
+    isInitialLoadRef.current = false;
+    
+    // 延迟滚动，防止图片加载导致高度变化（也用 instant）
+    const timer = setTimeout(() => scrollToBottom(true), 100);
     return () => clearTimeout(timer);
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
@@ -567,7 +592,7 @@ export default function ChatArea() {
                       src={msg.imageUrl}
                       alt="Shared image"
                       className="max-w-[280px] max-h-[280px] rounded-xl cursor-zoom-in hover:opacity-90 transition-opacity"
-                      onLoad={scrollToBottom}
+                      onLoad={() => scrollToBottom(true)}
                       onError={() => markImageExpired(msg.imageUrl)}
                       onClick={() => {
                         const imageMessages = messages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl));

@@ -498,6 +498,19 @@ export const useChatStore = create((set, get) => ({
       }
     });
 
+    // 私聊会话删除事件
+    socket.on('conversation_deleted', ({ conversationId }) => {
+      const { currentDM, fetchDMList } = get();
+      
+      // 如果当前打开的是被删除的会话，关闭它
+      if (currentDM && currentDM.id === conversationId) {
+        set({ currentDM: null, dmMessages: [], showDMPanel: false });
+      }
+      
+      // 刷新会话列表
+      fetchDMList();
+    });
+
     // Initial fetch
     socket.emit('get_rooms', (rooms) => {
         // Process cooldowns into timestamps
@@ -996,6 +1009,21 @@ export const useChatStore = create((set, get) => ({
       }
       
       socket.emit('delete_dm_message', { messageId, conversationId: currentDM.id }, (response) => {
+        resolve(response || { success: true });
+      });
+    });
+  },
+
+  // 删除整个私聊会话
+  deleteConversation: (conversationId) => {
+    return new Promise((resolve) => {
+      socket.emit('delete_conversation', conversationId, (response) => {
+        if (response?.success) {
+          // 从列表中移除
+          set((state) => ({
+            dmList: state.dmList.filter(conv => conv.id !== conversationId)
+          }));
+        }
         resolve(response || { success: true });
       });
     });

@@ -13,13 +13,14 @@ export default function Sidebar() {
     fetchAdminRooms, openAdminPanel, connected,
     // DM 相关
     dmList, dmUnreadTotal, fetchDMList, startDM, enterDM, searchUsers,
-    currentDM, showDMPanel
+    currentDM, showDMPanel, deleteConversation
   } = useChatStore();
   const { theme, toggleTheme } = useThemeStore();
   const [isCreating, setIsCreating] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'join'
   const [inputValue, setInputValue] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, roomId: null, roomName: '' });
+  const [deleteDMModal, setDeleteDMModal] = useState({ open: false, convId: null, userName: '' });
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [now, setNow] = useState(Date.now());
   
@@ -395,7 +396,7 @@ export default function Sidebar() {
               dmList.map((conv) => {
                 const isActive = currentDM?.id === conv.id && showDMPanel;
                 return (
-                  <div key={conv.id}>
+                  <div key={conv.id} className="group relative">
                     <button
                       onClick={() => enterDM(conv)}
                       className={clsx(
@@ -431,6 +432,17 @@ export default function Sidebar() {
                           {conv.lastMessage || 'No messages yet'}
                         </p>
                       </div>
+                    </button>
+                    {/* 删除按钮 - hover 显示 */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteDMModal({ open: true, convId: conv.id, userName: conv.otherUser?.name });
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                      title="删除会话"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 );
@@ -538,6 +550,17 @@ export default function Sidebar() {
         title="Delete Room?"
         message={`This will permanently delete "${deleteModal.roomName}" and all its messages. This action cannot be undone.`}
         confirmText="Delete"
+        confirmVariant="danger"
+      />
+
+      {/* Delete DM Confirmation Modal */}
+      <Modal
+        isOpen={deleteDMModal.open}
+        onClose={() => setDeleteDMModal({ open: false, convId: null, userName: '' })}
+        onConfirm={() => deleteConversation(deleteDMModal.convId)}
+        title="删除会话"
+        message={`确定要删除与 "${deleteDMModal.userName}" 的聊天记录吗？此操作不可撤销。`}
+        confirmText="删除"
         confirmVariant="danger"
       />
 

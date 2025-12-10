@@ -43,6 +43,8 @@ export default function DMChatArea() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const prevMessageCountRef = useRef(0); // 用于判断是新消息还是初次加载
+  const isInitialLoadRef = useRef(true); // 是否首次加载
 
   // 点击外部关闭消息菜单
   useEffect(() => {
@@ -52,9 +54,12 @@ export default function DMChatArea() {
     return () => document.removeEventListener('click', handleClick);
   }, [activeMenuMsgId]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // 智能滚动：首次加载用 instant，新消息用 smooth
+  const scrollToBottom = useCallback((instant = false) => {
+    messagesEndRef.current?.scrollIntoView({ 
+      behavior: instant ? 'instant' : 'smooth' 
+    });
+  }, []);
 
   const markImageExpired = useCallback((url) => {
     if (!url) return;
@@ -71,10 +76,30 @@ export default function DMChatArea() {
     return dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [dmMessages, expiredImages]);
 
+  // 切换会话时重置初始加载状态
   useEffect(() => {
-    scrollToBottom();
-    // 延迟滚动，防止图片加载导致高度变化
-    const timer = setTimeout(scrollToBottom, 100);
+    isInitialLoadRef.current = true;
+    prevMessageCountRef.current = 0;
+  }, [currentDM?.id]);
+
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current;
+    const currentCount = dmMessages.length;
+    
+    // 判断是否是首次加载或批量加载（进入会话）
+    const isInitialOrBulkLoad = isInitialLoadRef.current || 
+      (currentCount - prevCount > 1) || 
+      prevCount === 0;
+    
+    // 首次/批量加载用 instant，单条新消息用 smooth
+    scrollToBottom(isInitialOrBulkLoad);
+    
+    // 更新计数
+    prevMessageCountRef.current = currentCount;
+    isInitialLoadRef.current = false;
+    
+    // 延迟滚动，防止图片加载导致高度变化（也用 instant）
+    const timer = setTimeout(() => scrollToBottom(true), 100);
     
     // 如果有新消息且当前正在查看该会话，清除未读
     if (currentDM) {
@@ -82,7 +107,7 @@ export default function DMChatArea() {
     }
     
     return () => clearTimeout(timer);
-  }, [dmMessages, currentDM, clearDMUnread]);
+  }, [dmMessages, currentDM, clearDMUnread, scrollToBottom]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
@@ -424,7 +449,7 @@ export default function DMChatArea() {
                       src={msg.imageUrl}
                       alt="Shared image"
                       className="max-w-[280px] max-h-[280px] rounded-xl cursor-zoom-in hover:opacity-90 transition-opacity"
-                      onLoad={scrollToBottom}
+                      onLoad={() => scrollToBottom(true)}
                       onError={() => markImageExpired(msg.imageUrl)}
                       onClick={() => {
                         const imageMessages = dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl));

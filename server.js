@@ -591,6 +591,40 @@ class DataPersistence {
     });
   }
 
+  // 删除整个私聊会话（包括所有消息）
+  deleteConversation(conversationId, userId) {
+    return new Promise((resolve, reject) => {
+      // 首先验证用户是否是会话参与者
+      this.db.get(
+        `SELECT * FROM dm_conversations WHERE id = ? AND (user1_id = ? OR user2_id = ?)`,
+        [conversationId, userId, userId],
+        (err, row) => {
+          if (err) return reject(err);
+          if (!row) return resolve(false); // 不是参与者
+          
+          // 删除会话中的所有消息
+          this.db.run(
+            `DELETE FROM dm_messages WHERE conversation_id = ?`,
+            [conversationId],
+            (err) => {
+              if (err) return reject(err);
+              
+              // 删除会话本身
+              this.db.run(
+                `DELETE FROM dm_conversations WHERE id = ?`,
+                [conversationId],
+                function(err) {
+                  if (err) return reject(err);
+                  resolve(this.changes > 0);
+                }
+              );
+            }
+          );
+        }
+      );
+    });
+  }
+
   // 获取单条消息（用于验证权限）
   getMessage(messageId, roomId) {
     return new Promise((resolve, reject) => {
@@ -2002,6 +2036,30 @@ io.on('connection', (socket) => {
       console.log(`DM message ${messageId} deleted by ${user.username}`);
     } catch (err) {
       console.error('Delete DM message error:', err);
+      if (callback) callback({ success: false, error: '删除失败' });
+    }
+  });
+
+  // 20. 删除整个私聊会话
+  socket.on('delete_conversation', async (conversationId, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+
+    try {
+      const deleted = await persistence.deleteConversation(conversationId, user.persistentId);
+      if (!deleted) {
+        return callback && callback({ success: false, error: '删除失败或无权限' });
+      }
+
+      // 通知会话中的其他用户刷新列表
+      io.to(`dm:${conversationId}`).emit('conversation_deleted', { conversationId });
+      
+      if (callback) callback({ success: true });
+      console.log(`Conversation ${conversationId} deleted by ${user.username}`);
+    } catch (err) {
+      console.error('Delete conversation error:', err);
       if (callback) callback({ success: false, error: '删除失败' });
     }
   });

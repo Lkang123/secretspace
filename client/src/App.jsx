@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from './store';
 import { useThemeStore } from './themeStore';
@@ -9,6 +9,71 @@ import DMChatArea from './components/DMChatArea';
 import DialogContainer, { showConfirm, showAlert } from './components/Dialog';
 import { AlertTriangle, CheckCircle, X, Shield, Trash2, Users, Edit2, Key, LogIn, UserX, Crown } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
+
+// 动态更新 favicon 徽标
+const originalFavicon = '/vite.svg'; // 原始 favicon 路径
+let faviconCanvas = null;
+let faviconCtx = null;
+let faviconImg = null;
+let faviconLoaded = false;
+
+function updateFaviconBadge(count) {
+  // 获取或创建 canvas
+  if (!faviconCanvas) {
+    faviconCanvas = document.createElement('canvas');
+    faviconCanvas.width = 32;
+    faviconCanvas.height = 32;
+    faviconCtx = faviconCanvas.getContext('2d');
+  }
+
+  // 加载原始 favicon
+  if (!faviconImg) {
+    faviconImg = new Image();
+    faviconImg.crossOrigin = 'anonymous';
+    faviconImg.onload = () => {
+      faviconLoaded = true;
+      updateFaviconBadge(count); // 重新调用以绘制
+    };
+    faviconImg.src = originalFavicon;
+    return;
+  }
+
+  if (!faviconLoaded) return;
+
+  // 清空画布
+  faviconCtx.clearRect(0, 0, 32, 32);
+  
+  // 绘制原始图标
+  faviconCtx.drawImage(faviconImg, 0, 0, 32, 32);
+
+  // 如果有未读数，绘制红色徽标
+  if (count > 0) {
+    const text = count > 99 ? '99+' : String(count);
+    const badgeSize = text.length > 2 ? 20 : 16;
+    const x = 32 - badgeSize;
+    const y = 0;
+
+    // 绘制红色圆形背景
+    faviconCtx.beginPath();
+    faviconCtx.arc(x + badgeSize / 2, y + badgeSize / 2, badgeSize / 2, 0, 2 * Math.PI);
+    faviconCtx.fillStyle = '#ef4444';
+    faviconCtx.fill();
+
+    // 绘制白色数字
+    faviconCtx.fillStyle = '#ffffff';
+    faviconCtx.font = `bold ${text.length > 2 ? 9 : 11}px Arial`;
+    faviconCtx.textAlign = 'center';
+    faviconCtx.textBaseline = 'middle';
+    faviconCtx.fillText(text, x + badgeSize / 2, y + badgeSize / 2 + 1);
+  }
+
+  // 更新 favicon
+  const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+  link.type = 'image/png';
+  link.rel = 'icon';
+  link.href = faviconCanvas.toDataURL('image/png');
+  document.head.appendChild(link);
+}
 
 function App() {
   const { 
@@ -41,10 +106,42 @@ function App() {
     closeKickCooldownModal,
     // DM 相关
     showDMPanel,
-    currentDM
+    currentDM,
+    dmUnreadTotal,
+    rooms
   } = useChatStore();
   const { theme } = useThemeStore();
   
+  // 计算总未读数（房间 + 私聊）
+  const totalUnread = useMemo(() => {
+    const roomUnread = rooms?.reduce((sum, r) => sum + (r.unreadCount || 0), 0) || 0;
+    return roomUnread + (dmUnreadTotal || 0);
+  }, [rooms, dmUnreadTotal]);
+
+  // 未读消息徽标：更新标题和 favicon
+  useEffect(() => {
+    const originalTitle = 'SecretSpace';
+    
+    // 更新标题
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread > 99 ? '99+' : totalUnread}) ${originalTitle}`;
+    } else {
+      document.title = originalTitle;
+    }
+
+    // 更新 favicon 徽标
+    updateFaviconBadge(totalUnread);
+
+    // 尝试使用 Navigator Badge API（PWA 支持）
+    if ('setAppBadge' in navigator) {
+      if (totalUnread > 0) {
+        navigator.setAppBadge(totalUnread).catch(() => {});
+      } else {
+        navigator.clearAppBadge().catch(() => {});
+      }
+    }
+  }, [totalUnread]);
+
   // Admin dismiss confirmation state
   const [dismissConfirm, setDismissConfirm] = useState({ open: false, room: null });
 
