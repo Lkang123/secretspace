@@ -463,8 +463,8 @@ class DataPersistence {
     });
   }
 
-  // 获取私聊消息历史
-  getDMHistory(conversationId, limit = 100) {
+  // 获取私聊消息历史（限制条数）
+  getDMHistory(conversationId, limit = 50) {
     return new Promise((resolve, reject) => {
       this.db.all(
         `SELECT * FROM dm_messages 

@@ -27,7 +27,7 @@ const LightboxLazy = React.lazy(async () => {
 
 export default function DMChatArea() {
   const { 
-    currentDM, dmMessages, sendDMMessage, user, closeDM, setReplyingTo, replyingTo,
+    currentDM, dmMessages, dmLoading, sendDMMessage, user, closeDM, setReplyingTo, replyingTo,
     uploadingImage, sendDMImageMessage, connected, clearDMUnread,
     // 消息撤回/删除
     recallDMMessage, deleteDMMessage
@@ -71,6 +71,8 @@ export default function DMChatArea() {
   const lightboxSlides = useMemo(() => {
     return dmMessages.filter(m => m.imageUrl && !expiredImages.has(m.imageUrl)).map(m => ({ src: m.imageUrl }));
   }, [dmMessages, expiredImages]);
+
+  const skeletons = useMemo(() => Array.from({ length: 6 }), []);
 
   // 记录上一次消息数量，用于判断是否有新消息
   const prevMsgCountRef = useRef(0);
@@ -296,7 +298,31 @@ export default function DMChatArea() {
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto pb-20 px-4 space-y-1 pt-16">
-        {dmMessages.map((msg, i) => {
+        {/* 同步中提示（有缓存时显示小角标） */}
+        {dmLoading && dmMessages.length > 0 && (
+          <div className="flex justify-center">
+            <span className="px-3 py-1 text-xs rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-200 mb-2">
+              正在同步最新消息…
+            </span>
+          </div>
+        )}
+
+        {/* 骨架屏：无缓存且正在加载时显示 */}
+        {dmLoading && dmMessages.length === 0 && (
+          <div className="space-y-3">
+            {skeletons.map((_, idx) => (
+              <div key={idx} className="flex gap-3 items-start">
+                <div className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                <div className="flex-1 space-y-2">
+                  <div className="w-24 h-3 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                  <div className="w-40 h-4 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!dmLoading && dmMessages.map((msg, i) => {
           const isMe = msg.senderId === user.id;
 
           return (

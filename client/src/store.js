@@ -54,6 +54,7 @@ export const useChatStore = create((set, get) => ({
   dmMessages: [], // 当前私聊消息
   dmMessageCache: {}, // 各会话消息缓存
   dmUnreadTotal: 0, // 私聊未读总数
+  dmLoading: false, // 私聊加载状态
   showDMPanel: false, // 是否显示私聊面板
   
   // 全局通知状态
@@ -100,7 +101,7 @@ export const useChatStore = create((set, get) => ({
 
   // DM 相关方法
   openDMPanel: () => set({ showDMPanel: true }),
-  closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [] }),
+  closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [], dmLoading: false }),
   
   clearPendingImage: () => {
     const { pendingImage } = get();
@@ -1010,11 +1011,12 @@ export const useChatStore = create((set, get) => ({
                 : conv
             );
             const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
-            return { dmList: newDmList, dmUnreadTotal };
+            return { dmList: newDmList, dmUnreadTotal, dmLoading: false };
           });
           
           resolve({ success: true });
         } else {
+          set({ dmLoading: false });
           resolve({ success: false, error: response.error });
         }
       });
@@ -1033,7 +1035,8 @@ export const useChatStore = create((set, get) => ({
       set((state) => ({
         currentDM: conversation,
         showDMPanel: true,
-        dmMessages: state.dmMessageCache[conversation.id] || [] // 使用缓存，避免空白
+        dmMessages: state.dmMessageCache[conversation.id] || [], // 使用缓存，避免空白
+        dmLoading: true
       }));
 
       socket.emit('enter_dm', conversation.id, (response) => {
@@ -1041,7 +1044,7 @@ export const useChatStore = create((set, get) => ({
           set((state) => {
             const history = response.history || [];
             const newCache = { ...state.dmMessageCache, [conversation.id]: history };
-            return { dmMessages: history, dmMessageCache: newCache };
+            return { dmMessages: history, dmMessageCache: newCache, dmLoading: false };
           });
           
           // 更新列表中的未读数
