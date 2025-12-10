@@ -439,7 +439,10 @@ export default function Sidebar() {
                         e.stopPropagation();
                         setDeleteDMModal({ open: true, convId: conv.id, userName: conv.otherUser?.name });
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                      className={clsx(
+                        "absolute top-1/2 -translate-y-1/2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all",
+                        conv.unreadCount > 0 ? "right-10" : "right-2"
+                      )}
                       title="删除会话"
                     >
                       <Trash2 size={14} />
