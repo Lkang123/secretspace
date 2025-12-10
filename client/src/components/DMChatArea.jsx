@@ -277,7 +277,7 @@ export default function DMChatArea() {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto pb-20 px-4 space-y-1 scroll-smooth pt-16">
+      <div className="flex-1 overflow-y-auto pb-20 px-4 space-y-1 pt-16">
         {dmMessages.map((msg, i) => {
           const isMe = msg.senderId === user.id;
 

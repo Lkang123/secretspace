@@ -395,7 +395,7 @@ export default function ChatArea() {
       </AnimatePresence>
 
       {/* Messages Area */}
-      <div className={`flex-1 overflow-y-auto pb-20 px-4 space-y-1 scroll-smooth ${roomBanner && !bannerDismissed ? 'pt-[100px]' : 'pt-16'}`}>
+      <div className={`flex-1 overflow-y-auto pb-20 px-4 space-y-1 ${roomBanner && !bannerDismissed ? 'pt-[100px]' : 'pt-16'}`}>
         {messages.map((msg, i) => {
           const isMe = msg.senderId === user.id;
           const isSystem = msg.type === 'system';
