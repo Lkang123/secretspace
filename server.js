@@ -1940,6 +1940,13 @@ io.on('connection', (socket) => {
       socket.join(`dm:${conversationId}`);
       await persistence.markDMMessagesAsRead(conversationId, user.persistentId);
       
+      // 通知对方消息已被阅读
+      socket.to(`dm:${conversationId}`).emit('dm_messages_read', {
+        conversationId,
+        readBy: user.persistentId,
+        readByName: user.username
+      });
+      
       const history = await persistence.getDMHistory(conversationId);
       callback({ success: true, history });
     } catch (err) {
@@ -1957,6 +1964,14 @@ io.on('connection', (socket) => {
     
     try {
       await persistence.markDMMessagesAsRead(conversationId, user.persistentId);
+      
+      // 通知对方消息已被阅读
+      socket.to(`dm:${conversationId}`).emit('dm_messages_read', {
+        conversationId,
+        readBy: user.persistentId,
+        readByName: user.username
+      });
+      
       if (callback) callback({ success: true });
     } catch (err) {
       console.error('Mark DM read error:', err);

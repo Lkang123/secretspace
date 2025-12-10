@@ -450,9 +450,17 @@ export default function DMChatArea() {
                   )}
                 </div>
                 )}
-                <span className={`text-[11px] text-zinc-400 dark:text-zinc-600 mt-1 block ${isMe ? 'text-right' : 'text-left'}`}>
-                  {formatMessageTime(msg.timestamp)}
-                </span>
+                <div className={`flex items-center gap-1.5 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                  <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
+                    {formatMessageTime(msg.timestamp)}
+                  </span>
+                  {/* 已读状态 - 只显示在自己发送的消息上 */}
+                  {isMe && !msg.recalled && (
+                    <span className={`text-[10px] ${msg.isRead ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-600'}`}>
+                      {msg.isRead ? '✓✓' : '✓'}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Avatar - right side for me */}

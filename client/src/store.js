@@ -572,6 +572,20 @@ export const useChatStore = create((set, get) => ({
       }
     });
 
+    // 私聊消息已读回执
+    socket.on('dm_messages_read', ({ conversationId, readBy }) => {
+      const { currentDM, user } = get();
+      
+      // 只有当对方读了我的消息时才更新
+      if (currentDM && currentDM.id === conversationId && readBy !== user?.id) {
+        set((state) => ({
+          dmMessages: state.dmMessages.map(msg =>
+            msg.senderId === user?.id ? { ...msg, isRead: true } : msg
+          )
+        }));
+      }
+    });
+
     // 私聊会话删除事件
     socket.on('conversation_deleted', ({ conversationId }) => {
       const { currentDM, fetchDMList } = get();
