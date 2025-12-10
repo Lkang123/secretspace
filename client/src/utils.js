@@ -106,3 +106,39 @@ export function updateTitleNotification(count) {
     }
   }
 }
+
+// 智能时间格式化
+export function formatMessageTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  // 判断是否是今天
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return time;
+  }
+  
+  // 判断是否是昨天
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+  if (isYesterday) {
+    return `昨天 ${time}`;
+  }
+  
+  // 判断是否是今年
+  const isThisYear = date.getFullYear() === now.getFullYear();
+  if (isThisYear) {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${month}-${day} ${time}`;
+  }
+  
+  // 更早的日期
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day} ${time}`;
+}

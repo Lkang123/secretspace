@@ -4,7 +4,7 @@ import 'yet-another-react-lightbox/styles.css';
 import { useChatStore } from '../store';
 import { Hash, ArrowLeft, Copy, Check, Reply, X, Smile, Megaphone, Volume2, Image, Loader2, Undo2, Trash2 } from 'lucide-react';
 import { showAlert, showConfirm } from './Dialog';
-import { getAvatarColor, getInitials, getAvatarUrl, getPresetAvatarUrl } from '../utils';
+import { getAvatarColor, getInitials, getAvatarUrl, getPresetAvatarUrl, formatMessageTime } from '../utils';
 
 const EmojiPickerLazy = React.lazy(() => import('emoji-picker-react'));
 
@@ -594,7 +594,7 @@ export default function ChatArea() {
                 </div>
                 )}
                 <span className={`text-[11px] text-zinc-400 dark:text-zinc-600 mt-1 block ${isMe ? 'text-right' : 'text-left'}`}>
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatMessageTime(msg.timestamp)}
                 </span>
               </div>
 
