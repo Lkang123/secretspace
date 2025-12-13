@@ -142,3 +142,73 @@ export function formatMessageTime(timestamp) {
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day} ${time}`;
 }
+
+
+// Page Visibility API utilities
+// Used to check if the page is visible and listen for visibility changes
+
+/**
+ * Check if the page is currently visible
+ * Falls back to true if the Visibility API is not supported
+ * @returns {boolean} true if the page is visible, false if hidden
+ */
+export function isPageVisible() {
+  if (typeof document === 'undefined') return true;
+  if (typeof document.hidden === 'undefined') return true;
+  return !document.hidden;
+}
+
+/**
+ * Register a callback for page visibility changes
+ * @param {function(boolean): void} callback - Called with true when page becomes visible, false when hidden
+ * @returns {function(): void} Cleanup function to remove the listener
+ */
+export function onVisibilityChange(callback) {
+  if (typeof document === 'undefined' || typeof document.addEventListener === 'undefined') {
+    // Return no-op cleanup if not in browser environment
+    return () => {};
+  }
+  
+  const handler = () => {
+    callback(isPageVisible());
+  };
+  
+  document.addEventListener('visibilitychange', handler);
+  
+  // Return cleanup function
+  return () => {
+    document.removeEventListener('visibilitychange', handler);
+  };
+}
+
+/**
+ * Creates a debounced version of a function that delays execution
+ * until after the specified wait time has elapsed since the last call.
+ * @param {function} fn - The function to debounce
+ * @param {number} wait - The number of milliseconds to delay (default: 300ms)
+ * @returns {function & { cancel: function }} Debounced function with a cancel method
+ */
+export function debounce(fn, wait = 300) {
+  let timeoutId = null;
+  
+  const debounced = (...args) => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    
+    timeoutId = setTimeout(() => {
+      fn(...args);
+      timeoutId = null;
+    }, wait);
+  };
+  
+  // Add cancel method to clear pending execution
+  debounced.cancel = () => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+  
+  return debounced;
+}

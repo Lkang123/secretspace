@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { playNotificationSound, updateTitleNotification } from './utils';
+import { playNotificationSound, updateTitleNotification, isPageVisible, onVisibilityChange, debounce } from './utils';
+
+// Create a debounced mark_dm_read emitter (300ms delay)
+// This prevents excessive server requests when visibility changes frequently
+const debouncedMarkDMRead = debounce((conversationId) => {
+  socket.emit('mark_dm_read', conversationId);
+}, 300);
 
 const MAX_MESSAGES = 300;
 
@@ -103,6 +109,32 @@ export const useChatStore = create((set, get) => ({
   openDMPanel: () => set({ showDMPanel: true }),
   closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [], dmLoading: false }),
   
+  // 处理页面可见性变化 - 当页面从隐藏变为可见时，标记当前会话为已读
+  handleVisibilityChange: (isVisible) => {
+    if (!isVisible) return; // 只处理变为可见的情况
+    
+    const { currentDM, showDMPanel, dmList } = get();
+    
+    // 如果当前有打开的 DM 会话且面板可见
+    if (currentDM && showDMPanel) {
+      // 检查该会话是否有未读消息
+      const conversation = dmList.find(conv => conv.id === currentDM.id);
+      if (conversation && conversation.unreadCount > 0) {
+        // 更新本地未读数
+        set((state) => {
+          const newDmList = state.dmList.map(conv => 
+            conv.id === currentDM.id ? { ...conv, unreadCount: 0 } : conv
+          );
+          const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+          return { dmList: newDmList, dmUnreadTotal };
+        });
+        
+        // 通知服务端标记已读（使用防抖）
+        debouncedMarkDMRead(currentDM.id);
+      }
+    }
+  },
+  
   clearPendingImage: () => {
     const { pendingImage } = get();
     if (pendingImage?.preview) {
@@ -119,7 +151,8 @@ export const useChatStore = create((set, get) => ({
       const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
       return { dmList: newDmList, dmUnreadTotal };
     });
-    socket.emit('mark_dm_read', conversationId);
+    // 使用防抖发送已读请求
+    debouncedMarkDMRead(conversationId);
   },
 
   resetGlobalUnread: () => {
@@ -135,9 +168,14 @@ export const useChatStore = create((set, get) => ({
 
     // 监听可见性变化
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
+      const isVisible = !document.hidden;
+      
+      if (isVisible) {
         // 清除标题通知
         get().resetGlobalUnread();
+        
+        // 处理 DM 已读状态
+        get().handleVisibilityChange(true);
         
         // 检测连接状态，如果断开则强制重连
         if (!socket.connected) {
@@ -514,8 +552,8 @@ export const useChatStore = create((set, get) => ({
         return;
       }
       
-      // Check if viewing
-      const isViewing = currentDM && String(currentDM.id) === String(conversationId) && showDMPanel;
+      // Check if viewing - 必须同时满足：页面可见、当前会话匹配、DM面板打开
+      const isViewing = currentDM && String(currentDM.id) === String(conversationId) && showDMPanel && isPageVisible();
       
       if (!isViewing) {
           playNotificationSound();
@@ -528,15 +566,13 @@ export const useChatStore = create((set, get) => ({
       
       set((state) => {
         // 准确判断是否是当前正在查看的会话
-        // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的
+        // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的 3. 页面可见
         // 使用 String() 确保 ID 类型一致
-        // const isViewing = ... (already calculated above, but we need it inside set for consistency with state updates if race conditions)
-        // Let's use the one from state to be safe inside reducer
-        const isViewingInner = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel;
+        const isViewingInner = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel && isPageVisible();
         
         if (isViewingInner) {
-            // 如果正在查看，通知后端已读
-            socket.emit('mark_dm_read', conversationId);
+            // 只有当页面可见且当前会话匹配时才通知后端已读（使用防抖）
+            debouncedMarkDMRead(conversationId);
         }
 
         const newDmList = state.dmList.map(conv => {
@@ -1047,16 +1083,22 @@ export const useChatStore = create((set, get) => ({
             return { dmMessages: history, dmMessageCache: newCache, dmLoading: false };
           });
           
-          // 更新列表中的未读数
-          set((state) => {
-            const newDmList = state.dmList.map(conv => 
-              conv.id === conversation.id 
-                ? { ...conv, unreadCount: 0 }
-                : conv
-            );
-            const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
-            return { dmList: newDmList, dmUnreadTotal };
-          });
+          // 只有当页面可见时才标记消息为已读
+          if (isPageVisible()) {
+            // 更新列表中的未读数
+            set((state) => {
+              const newDmList = state.dmList.map(conv => 
+                conv.id === conversation.id 
+                  ? { ...conv, unreadCount: 0 }
+                  : conv
+              );
+              const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+              return { dmList: newDmList, dmUnreadTotal };
+            });
+            
+            // 通知服务端标记已读（使用防抖）
+            debouncedMarkDMRead(conversation.id);
+          }
           
           resolve({ success: true });
         } else {
