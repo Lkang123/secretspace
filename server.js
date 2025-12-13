@@ -752,6 +752,42 @@ const broadcastAdminRoomUpdate = (roomId) => {
   });
 };
 
+// 检查用户是否在线（通过 persistentId）
+const isUserOnline = (persistentId) => {
+  for (const u of users.values()) {
+    if (u.persistentId === persistentId) {
+      return true;
+    }
+  }
+  return false;
+};
+
+// 通知用户的私聊对象其在线状态变化
+const notifyDMContactsOnlineStatus = async (userId, isOnline) => {
+  try {
+    // 获取该用户的所有私聊会话
+    const conversations = await persistence.getUserDMConversations(userId);
+    
+    // 遍历每个会话，通知对方用户
+    for (const conv of conversations) {
+      const otherUserId = conv.otherUser.id;
+      
+      // 找到对方用户的所有在线 socket
+      for (const [socketId, u] of users.entries()) {
+        if (u.persistentId === otherUserId) {
+          // 通知对方用户
+          io.to(socketId).emit('dm_user_status', {
+            userId: userId,
+            isOnline
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error notifying DM contacts:', err);
+  }
+};
+
 // Serve static files from client/dist
 app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
@@ -913,6 +949,9 @@ io.on('connection', (socket) => {
     // Send user's joined rooms
     socket.emit('rooms_updated', getUserRooms(persistentId));
     console.log('User logged in');
+    
+    // 通知该用户的私聊对象：用户上线了
+    notifyDMContactsOnlineStatus(persistentId, true);
   });
 
   // 1.5 Update Avatar
@@ -1929,6 +1968,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 15.5 查询用户在线状态
+  socket.on('check_user_online', (userId, callback) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      return callback && callback({ success: false, error: 'Not logged in' });
+    }
+    
+    const online = isUserOnline(userId);
+    if (callback) callback({ success: true, isOnline: online });
+  });
+
   // 16. 进入私聊会话（加入房间 + 标记已读）
   socket.on('enter_dm', async (conversationId, callback) => {
     const user = users.get(socket.id);
@@ -2092,6 +2142,16 @@ io.on('connection', (socket) => {
     if (user) {
       console.log('User disconnected');
       
+      // 先删除用户，再检查是否还有其他 session
+      const persistentId = user.persistentId;
+      users.delete(socket.id);
+      
+      // 检查该用户是否还有其他在线 session
+      // 只有当用户完全下线时才通知私聊对象
+      if (persistentId && !isUserOnline(persistentId)) {
+        notifyDMContactsOnlineStatus(persistentId, false);
+      }
+      
       // If user was in a room, notify others and update counts
       if (user.currentRoom) {
         const roomId = user.currentRoom;
@@ -2123,8 +2183,6 @@ io.on('connection', (socket) => {
           }
         }
       }
-      
-      users.delete(socket.id);
     }
   });
 });

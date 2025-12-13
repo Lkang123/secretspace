@@ -62,6 +62,7 @@ export const useChatStore = create((set, get) => ({
   dmUnreadTotal: 0, // 私聊未读总数
   dmLoading: false, // 私聊加载状态
   showDMPanel: false, // 是否显示私聊面板
+  dmUserOnlineStatus: {}, // 私聊用户在线状态缓存 { oderId: boolean }
   
   // 全局通知状态
   globalUnreadCount: 0,
@@ -632,6 +633,13 @@ export const useChatStore = create((set, get) => ({
       }
     });
 
+    // 私聊用户在线状态变化
+    socket.on('dm_user_status', ({ userId, isOnline }) => {
+      set((state) => ({
+        dmUserOnlineStatus: { ...state.dmUserOnlineStatus, [userId]: isOnline }
+      }));
+    });
+
     // 私聊会话删除事件
     socket.on('conversation_deleted', ({ conversationId }) => {
       const { currentDM, fetchDMList } = get();
@@ -1059,6 +1067,22 @@ export const useChatStore = create((set, get) => ({
     });
   },
 
+  // 查询用户在线状态
+  checkUserOnline: (userId) => {
+    return new Promise((resolve) => {
+      socket.emit('check_user_online', userId, (response) => {
+        if (response.success) {
+          set((state) => ({
+            dmUserOnlineStatus: { ...state.dmUserOnlineStatus, [userId]: response.isOnline }
+          }));
+          resolve(response.isOnline);
+        } else {
+          resolve(false);
+        }
+      });
+    });
+  },
+
   // 进入已有的私聊会话
   enterDM: (conversation) => {
     return new Promise((resolve) => {
@@ -1074,6 +1098,11 @@ export const useChatStore = create((set, get) => ({
         dmMessages: state.dmMessageCache[conversation.id] || [], // 使用缓存，避免空白
         dmLoading: true
       }));
+
+      // 查询对方用户的在线状态
+      if (conversation.otherUser?.id) {
+        get().checkUserOnline(conversation.otherUser.id);
+      }
 
       socket.emit('enter_dm', conversation.id, (response) => {
         if (response.success) {

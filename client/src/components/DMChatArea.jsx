@@ -30,8 +30,15 @@ export default function DMChatArea() {
     currentDM, dmMessages, dmLoading, sendDMMessage, user, closeDM, setReplyingTo, replyingTo,
     uploadingImage, sendDMImageMessage, connected, clearDMUnread,
     // 消息撤回/删除
-    recallDMMessage, deleteDMMessage
+    recallDMMessage, deleteDMMessage,
+    // 用户在线状态
+    dmUserOnlineStatus
   } = useChatStore();
+  
+  // 获取对方用户的在线状态
+  const otherUserOnline = currentDM?.otherUser?.id 
+    ? dmUserOnlineStatus[currentDM.otherUser.id] 
+    : false;
   
   const [input, setInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -289,8 +296,17 @@ export default function DMChatArea() {
               {currentDM.otherUser?.name}
             </span>
             <span className="text-[12px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
-              {connected ? 'Online' : 'Reconnecting...'}
+              {!connected ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                  Reconnecting...
+                </>
+              ) : (
+                <>
+                  <span className={`w-1.5 h-1.5 rounded-full ${otherUserOnline ? 'bg-green-500' : 'bg-zinc-400'}`}></span>
+                  {otherUserOnline ? 'Online' : 'Offline'}
+                </>
+              )}
             </span>
           </div>
         </div>
