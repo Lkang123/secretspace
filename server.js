@@ -2022,8 +2022,6 @@ io.on('connection', (socket) => {
       callback({ success: true, history, otherUserOnline: otherOnline });
 
       // 进入会话后立即同步对方的在线状态
-      // 找到会话中的另一位用户
-      const otherUserId = currentConv?.otherUser?.id;
       if (otherUserId) {
         const isOtherOnline = isUserOnline(otherUserId);
         socket.emit('dm_user_status', { userId: otherUserId, isOnline: isOtherOnline });
