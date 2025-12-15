@@ -118,10 +118,29 @@ export const useChatStore = create((set, get) => ({
   openDMPanel: () => set({ showDMPanel: true }),
   closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [], dmLoading: false }),
   
-  // 处理页面可见性变化（目前仅保留占位，已读逻辑不再依赖可见性切换）
+  // 处理页面/窗口可见性变化：当用户真正回到前台并正在查看当前会话时，将该会话标记为已读
   handleVisibilityChange: (isVisible) => {
-    // 以前：当从隐藏变为可见时自动把当前会话标记已读
-    // 现在：为了避免“人不在电脑前消息就被标已读”，这里不再做已读处理
+    if (!isVisible) return;
+
+    const { currentDM, showDMPanel, dmList } = get();
+    // 必须：有当前会话、DM 面板打开、页面可见且窗口有焦点
+    if (!currentDM || !showDMPanel) return;
+    if (!isPageVisible() || !hasPageFocus()) return;
+
+    const conversation = dmList.find(conv => conv.id === currentDM.id);
+    if (!conversation || !conversation.unreadCount) return;
+
+    // 更新本地未读数
+    set((state) => {
+      const newDmList = state.dmList.map(conv =>
+        conv.id === currentDM.id ? { ...conv, unreadCount: 0 } : conv
+      );
+      const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+      return { dmList: newDmList, dmUnreadTotal };
+    });
+
+    // 通知服务端标记已读（使用防抖）
+    debouncedMarkDMRead(currentDM.id);
   },
   
   clearPendingImage: () => {
@@ -155,13 +174,15 @@ export const useChatStore = create((set, get) => ({
     if (isInitialized) return;
     isInitialized = true;
 
-    // 监听可见性变化（仅用于重置标题和连接保活，不再自动标记 DM 已读）
+    // 监听可见性变化（用于重置标题、连接保活 + 回到前台时处理 DM 已读）
     document.addEventListener('visibilitychange', () => {
       const isVisible = !document.hidden;
       
       if (isVisible) {
         // 清除标题通知
         get().resetGlobalUnread();
+        // 回到可见状态时尝试标记当前会话已读（需窗口有焦点）
+        get().handleVisibilityChange(true);
         
         // 检测连接状态，如果断开则强制重连
         if (!socket.connected) {
@@ -180,6 +201,11 @@ export const useChatStore = create((set, get) => ({
           });
         }
       }
+    });
+
+    // 监听窗口获得焦点：例如从其他应用切回浏览器
+    window.addEventListener('focus', () => {
+      get().handleVisibilityChange(true);
     });
 
     socket.on('connect', () => {
