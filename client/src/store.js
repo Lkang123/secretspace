@@ -118,30 +118,10 @@ export const useChatStore = create((set, get) => ({
   openDMPanel: () => set({ showDMPanel: true }),
   closeDMPanel: () => set({ showDMPanel: false, currentDM: null, dmMessages: [], dmLoading: false }),
   
-  // 处理页面可见性变化 - 当页面从隐藏变为可见时，标记当前会话为已读
+  // 处理页面可见性变化（目前仅保留占位，已读逻辑不再依赖可见性切换）
   handleVisibilityChange: (isVisible) => {
-    if (!isVisible) return; // 只处理变为可见的情况
-    
-    const { currentDM, showDMPanel, dmList } = get();
-    
-    // 如果当前有打开的 DM 会话且面板可见
-    if (currentDM && showDMPanel) {
-      // 检查该会话是否有未读消息
-      const conversation = dmList.find(conv => conv.id === currentDM.id);
-      if (conversation && conversation.unreadCount > 0) {
-        // 更新本地未读数
-        set((state) => {
-          const newDmList = state.dmList.map(conv => 
-            conv.id === currentDM.id ? { ...conv, unreadCount: 0 } : conv
-          );
-          const dmUnreadTotal = newDmList.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
-          return { dmList: newDmList, dmUnreadTotal };
-        });
-        
-        // 通知服务端标记已读（使用防抖）
-        debouncedMarkDMRead(currentDM.id);
-      }
-    }
+    // 以前：当从隐藏变为可见时自动把当前会话标记已读
+    // 现在：为了避免“人不在电脑前消息就被标已读”，这里不再做已读处理
   },
   
   clearPendingImage: () => {
@@ -175,16 +155,13 @@ export const useChatStore = create((set, get) => ({
     if (isInitialized) return;
     isInitialized = true;
 
-    // 监听可见性变化
+    // 监听可见性变化（仅用于重置标题和连接保活，不再自动标记 DM 已读）
     document.addEventListener('visibilitychange', () => {
       const isVisible = !document.hidden;
       
       if (isVisible) {
         // 清除标题通知
         get().resetGlobalUnread();
-        
-        // 处理 DM 已读状态
-        get().handleVisibilityChange(true);
         
         // 检测连接状态，如果断开则强制重连
         if (!socket.connected) {
