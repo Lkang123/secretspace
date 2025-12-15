@@ -1895,6 +1895,7 @@ io.on('connection', (socket) => {
           ...conversation,
           otherUser: { id: targetUserId, name: targetUsername }
         },
+        otherUserOnline: isUserOnline(targetUserId),
         history 
       });
 
@@ -2013,12 +2014,15 @@ io.on('connection', (socket) => {
       });
       
       const history = await persistence.getDMHistory(conversationId);
-      callback({ success: true, history });
+      const conversations = await persistence.getUserDMConversations(user.persistentId);
+      const currentConv = conversations.find(c => c.id === conversationId);
+      const otherUserId = currentConv?.otherUser?.id;
+      const otherOnline = otherUserId ? isUserOnline(otherUserId) : false;
+
+      callback({ success: true, history, otherUserOnline: otherOnline });
 
       // 进入会话后立即同步对方的在线状态
       // 找到会话中的另一位用户
-      const conversations = await persistence.getUserDMConversations(user.persistentId);
-      const currentConv = conversations.find(c => c.id === conversationId);
       const otherUserId = currentConv?.otherUser?.id;
       if (otherUserId) {
         const isOtherOnline = isUserOnline(otherUserId);

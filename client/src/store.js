@@ -1047,6 +1047,13 @@ export const useChatStore = create((set, get) => ({
             showDMPanel: true
           });
           
+          // 直接写入对方在线状态（服务器返回），避免前端闪烁
+          if (response.conversation?.otherUser?.id && typeof response.otherUserOnline === 'boolean') {
+            set((state) => ({
+              dmUserOnlineStatus: { ...state.dmUserOnlineStatus, [response.conversation.otherUser.id]: response.otherUserOnline }
+            }));
+          }
+
           // 刚创建/进入会话时立即查询对方在线状态，防止默认显示离线
           if (response.conversation?.otherUser?.id) {
             get().checkUserOnline(response.conversation.otherUser.id);
@@ -1117,6 +1124,13 @@ export const useChatStore = create((set, get) => ({
             return { dmMessages: history, dmMessageCache: newCache, dmLoading: false };
           });
           
+          // 同步在线状态（服务器返回）
+          if (conversation.otherUser?.id && typeof response.otherUserOnline === 'boolean') {
+            set((state) => ({
+              dmUserOnlineStatus: { ...state.dmUserOnlineStatus, [conversation.otherUser.id]: response.otherUserOnline }
+            }));
+          }
+
           // 只有当页面可见时才标记消息为已读
           if (isPageVisible()) {
             // 更新列表中的未读数
