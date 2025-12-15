@@ -30,6 +30,14 @@ const socket = io({
 
 let isInitialized = false; // Prevent duplicate listeners from StrictMode
 
+// 检查当前窗口是否真正处于前台（具有焦点）
+const hasPageFocus = () => {
+  if (typeof document === 'undefined' || typeof document.hasFocus !== 'function') {
+    return true;
+  }
+  return document.hasFocus();
+};
+
 // Check if there's a saved session (to determine initial restoring state)
 const hasSavedSession = !!localStorage.getItem('chat_session');
 
@@ -543,8 +551,12 @@ export const useChatStore = create((set, get) => ({
         return;
       }
       
-      // Check if viewing - 必须同时满足：页面可见、当前会话匹配、DM面板打开
-      const isViewing = currentDM && String(currentDM.id) === String(conversationId) && showDMPanel && isPageVisible();
+      // Check if viewing - 必须同时满足：页面可见、窗口有焦点、当前会话匹配、DM面板打开
+      const isViewing = currentDM 
+        && String(currentDM.id) === String(conversationId) 
+        && showDMPanel 
+        && isPageVisible()
+        && hasPageFocus();
       
       if (!isViewing) {
           playNotificationSound();
@@ -557,9 +569,13 @@ export const useChatStore = create((set, get) => ({
       
       set((state) => {
         // 准确判断是否是当前正在查看的会话
-        // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的 3. 页面可见
+        // 必须: 1. currentDM 存在且 ID 匹配 2. DM 面板是打开的 3. 页面可见 4. 浏览器窗口有焦点
         // 使用 String() 确保 ID 类型一致
-        const isViewingInner = state.currentDM && String(state.currentDM.id) === String(conversationId) && state.showDMPanel && isPageVisible();
+        const isViewingInner = state.currentDM 
+          && String(state.currentDM.id) === String(conversationId) 
+          && state.showDMPanel 
+          && isPageVisible()
+          && hasPageFocus();
         
         if (isViewingInner) {
             // 只有当页面可见且当前会话匹配时才通知后端已读（使用防抖）
