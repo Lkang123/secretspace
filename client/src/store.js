@@ -500,17 +500,7 @@ export const useChatStore = create((set, get) => ({
     
     // 接收私聊消息
     socket.on('receive_dm', ({ conversationId, message }) => {
-      const { currentDM, user, globalUnreadCount } = get();
-      
-      // 检查是否需要通知
-      if (message.senderId !== user?.id) {
-        if (document.hidden) {
-           const newCount = globalUnreadCount + 1;
-           set({ globalUnreadCount: newCount });
-           updateTitleNotification(newCount);
-           playNotificationSound();
-        }
-      }
+      const { currentDM } = get();
 
       // 如果是当前打开的会话，添加到消息列表
       if (currentDM && currentDM.id === conversationId) {
