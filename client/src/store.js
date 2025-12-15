@@ -1047,6 +1047,11 @@ export const useChatStore = create((set, get) => ({
             showDMPanel: true
           });
           
+          // 刚创建/进入会话时立即查询对方在线状态，防止默认显示离线
+          if (response.conversation?.otherUser?.id) {
+            get().checkUserOnline(response.conversation.otherUser.id);
+          }
+          
           // 更新列表中的未读数
           set((state) => {
             const newDmList = state.dmList.map(conv => 

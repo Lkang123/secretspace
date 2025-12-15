@@ -32,13 +32,13 @@ export default function DMChatArea() {
     // 消息撤回/删除
     recallDMMessage, deleteDMMessage,
     // 用户在线状态
-    dmUserOnlineStatus
+    dmUserOnlineStatus, checkUserOnline
   } = useChatStore();
   
   // 获取对方用户的在线状态
-  const otherUserOnline = currentDM?.otherUser?.id 
-    ? dmUserOnlineStatus[currentDM.otherUser.id] 
-    : false;
+  const otherUserId = currentDM?.otherUser?.id;
+  const otherUserStatus = otherUserId ? dmUserOnlineStatus[otherUserId] : undefined;
+  const otherUserOnline = !!otherUserStatus;
   
   const [input, setInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -88,6 +88,14 @@ export default function DMChatArea() {
   useEffect(() => {
     prevMsgCountRef.current = 0;
   }, [currentDM?.id]);
+
+  // 打开会话时若无状态缓存则主动查询，避免显示为离线
+  useEffect(() => {
+    if (!connected || !otherUserId) return;
+    if (otherUserStatus === undefined) {
+      checkUserOnline(otherUserId);
+    }
+  }, [connected, otherUserId, otherUserStatus, checkUserOnline]);
   
   // 只在有新消息时才滚动到底部
   useEffect(() => {
@@ -303,8 +311,8 @@ export default function DMChatArea() {
                 </>
               ) : (
                 <>
-                  <span className={`w-1.5 h-1.5 rounded-full ${otherUserOnline ? 'bg-green-500' : 'bg-zinc-400'}`}></span>
-                  {otherUserOnline ? 'Online' : 'Offline'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${otherUserStatus === undefined ? 'bg-amber-400 animate-pulse' : otherUserOnline ? 'bg-green-500' : 'bg-zinc-400'}`}></span>
+                  {otherUserStatus === undefined ? '同步中…' : otherUserOnline ? 'Online' : 'Offline'}
                 </>
               )}
             </span>
