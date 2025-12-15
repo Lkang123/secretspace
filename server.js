@@ -1897,6 +1897,21 @@ io.on('connection', (socket) => {
         },
         history 
       });
+
+      // 互相推送在线状态，防止因遗漏通知导致前端显示离线
+      socket.emit('dm_user_status', {
+        userId: targetUserId,
+        isOnline: isUserOnline(targetUserId)
+      });
+
+      for (const [sid, u] of users.entries()) {
+        if (u.persistentId === targetUserId) {
+          io.to(sid).emit('dm_user_status', {
+            userId: user.persistentId,
+            isOnline: true
+          });
+        }
+      }
     } catch (err) {
       console.error('Start DM error:', err);
       callback({ success: false, error: 'Failed to start DM' });
@@ -1999,6 +2014,16 @@ io.on('connection', (socket) => {
       
       const history = await persistence.getDMHistory(conversationId);
       callback({ success: true, history });
+
+      // 进入会话后立即同步对方的在线状态
+      // 找到会话中的另一位用户
+      const conversations = await persistence.getUserDMConversations(user.persistentId);
+      const currentConv = conversations.find(c => c.id === conversationId);
+      const otherUserId = currentConv?.otherUser?.id;
+      if (otherUserId) {
+        const isOtherOnline = isUserOnline(otherUserId);
+        socket.emit('dm_user_status', { userId: otherUserId, isOnline: isOtherOnline });
+      }
     } catch (err) {
       console.error('Enter DM error:', err);
       callback({ success: false, error: 'Failed to enter DM' });
